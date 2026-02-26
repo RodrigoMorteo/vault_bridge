@@ -38,16 +38,35 @@ npm install
 ```
 
 ## Configuration
-Environment variables:
-- `BWS_ACCESS_TOKEN` (**required**): Bitwarden Secrets Manager access token for the machine account.
-- `PORT` (optional, default `3000`): HTTP port.
-- `BWS_STATE_FILE` (optional, default `/tmp/bws_state.json`): Path for Bitwarden SDK state file.
+The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This token corresponds to a Bitwarden Machine Account.
+
+### Environment Variables
+| Variable | Description | Default | Required |
+| :--- | :--- | :--- | :--- |
+| `BWS_ACCESS_TOKEN` | Machine account access token. | - | **Yes** |
+| `PORT` | HTTP port for the service. | `3000` | No |
+| `BWS_STATE_FILE` | Path to store SDK state. | `/tmp/bws_state.json` | No |
 
 ## Running
+Ensure you have Node.js LTS installed and dependencies (`npm install`) are ready.
+
+### Linux / macOS (Bash/Zsh)
 ```bash
-source ~/.nvm/nvm.sh && nvm use --lts
-BWS_ACCESS_TOKEN="<token>" npm start
+export BWS_ACCESS_TOKEN="<your_machine_account_access_token>"
+npm start
 ```
+
+### Windows (PowerShell)
+```powershell
+$env:BWS_ACCESS_TOKEN="<your_machine_account_access_token>"
+npm start
+```
+
+### Docker (Example)
+```bash
+docker run -e BWS_ACCESS_TOKEN="<your_machine_account_access_token>" -p 3000:3000 my-vault-bridge
+```
+
 
 ## Testing
 ```bash
