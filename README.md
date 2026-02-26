@@ -12,6 +12,7 @@ Internal Bitwarden Secrets Manager bridge for MCP consumers. Handles plaintext s
 - [Testing](#testing)
 - [API](#api)
 - [Operational Notes](#operational-notes)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Overview
@@ -70,5 +71,11 @@ Tests mock `@bitwarden/sdk-napi`; no live Bitwarden access is required.
 - Process exits on failed Bitwarden authentication to avoid stale state.
 - Graceful shutdown is wired for `SIGTERM`/`SIGINT`.
 
+## Contributing
+Please read our [Contribution Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.  
+For security vulnerability reporting, see our [Security Policy](SECURITY.md).
+
 ## License
-MIT
+Licensed under the [Apache License 2.0](LICENSE).
+
+Copyright (c) 2026 Rodrigo Morteo.
