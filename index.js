@@ -69,7 +69,7 @@ function buildApp({ client: providedClient, isReady = () => true }) {
 }
 
 async function startServer() {
-    const port = process.env.PORT || 65500;
+    const port = process.env.PORT || 3000;
     const initializedClient = client || await initBitwarden();
     const app = buildApp({ client: initializedClient, isReady: () => isClientReady });
 
