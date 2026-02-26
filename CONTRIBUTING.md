@@ -7,7 +7,7 @@ Thank you for your interest in contributing to **bws-vault-bridge**! We welcome 
 1.  **Fork the repository** on GitHub.
 2.  **Clone your fork** locally:
     ```bash
-    git clone https://github.com/YOUR_USERNAME/bws-vault-bridge.git
+    git clone https://github.com/YOUR_USERNAME/vault_bridge.git
     cd bws-vault-bridge
     ```
 3.  **Install dependencies** (ensure you are using the correct Node.js LTS version):

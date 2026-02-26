@@ -16,7 +16,7 @@ Internal Bitwarden Secrets Manager bridge for MCP consumers. Handles plaintext s
 - [License](#license)
 
 ## Overview
-A minimal Express.js microservice that proxies secret retrieval from Bitwarden Secrets Manager (BWS) through APISix to an internal MCP client. Designed for internal-only use.
+A minimal Express.js microservice that proxies secret retrieval from Bitwarden Secrets Manager (BWS) to an MCP client. Designed for internal-only use.
 
 ## Architecture & Security Constraints
 - Never log, print, or expose secret `key`/`value` or `BWS_ACCESS_TOKEN`.
