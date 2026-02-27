@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  bws-vault-bridge:
+    build: .
+    container_name: bws-vault-bridge
+    image: bws-vault-bridge:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN:-your_access_token_here}
+      - PORT=3000
+      - BWS_STATE_FILE=/tmp/bws_state.json
+    volumes:
+      # Optional: Persist the SDK state file to avoid re-auth on restart
+      - bws_state:/tmp
+    # Security: Run as non-root user (defined in Dockerfile)
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  bws_state:
