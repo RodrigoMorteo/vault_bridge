@@ -116,8 +116,20 @@ Tests mock `@bitwarden/sdk-napi`; no live Bitwarden access is required.
 
 ## API
 ### GET `/health`
-- **200** `{ "status": "ok" }` when the Bitwarden client is ready.
-- **503** `{ "status": "unavailable" }` when not ready.
+
+Supports shallow (liveness) and deep (readiness) probe modes.
+
+**Shallow probe** (default):
+- **200** `{ "status": "ok" }` — Bitwarden client is ready.
+- **503** `{ "status": "unavailable" }` — not ready.
+
+**Deep probe** (`GET /health?deep=true`):
+- **200** `{ "status": "ok|degraded", "dependencies": { ... } }` — structured dependency health.
+- **503** `{ "status": "unavailable", "dependencies": { ... } }` — all dependencies down.
+
+Dependencies reported: `bitwarden_session` (active/expired), `cache` (enabled/disabled), `cache_size`, `circuit_breaker` (closed/open/half-open), `last_upstream_success` (ISO 8601 timestamp).
+
+Status is `degraded` when the cache has warm entries but the Bitwarden session is expired or the circuit breaker is open.
 
 ### GET `/vault/secret/:id`
 

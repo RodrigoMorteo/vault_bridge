@@ -14,16 +14,17 @@ const { classifyError } = require('../utils/errorClassifier');
  * Creates the vault routes router.
  *
  * @param {Object}   deps
- * @param {Object}   deps.client          - Bitwarden SDK client instance.
- * @param {Function} deps.isReady         - Returns true when the vault client is ready.
- * @param {Object}   [deps.cache]         - TTL cache instance (optional).
- * @param {Object}   [deps.circuitBreaker] - Circuit breaker instance (optional).
- * @param {Function} [deps.attemptReauth] - Re-auth function for token lifecycle (optional).
- * @param {Object}   [deps.instruments]   - Prometheus instruments (optional).
+ * @param {Object}   deps.client            - Bitwarden SDK client instance.
+ * @param {Function} deps.isReady           - Returns true when the vault client is ready.
+ * @param {Object}   [deps.cache]           - TTL cache instance (optional).
+ * @param {Object}   [deps.circuitBreaker]  - Circuit breaker instance (optional).
+ * @param {Function} [deps.attemptReauth]   - Re-auth function for token lifecycle (optional).
+ * @param {Object}   [deps.instruments]     - Prometheus instruments (optional).
+ * @param {Function} [deps.onUpstreamSuccess] - Callback on successful upstream call (optional).
  * @param {import('pino').Logger} [deps.logger] - Logger instance.
  * @returns {express.Router}
  */
-function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReauth, instruments, logger }) {
+function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReauth, instruments, onUpstreamSuccess, logger }) {
   const router = express.Router();
   const validateSecretId = createValidateSecretId();
 
@@ -51,7 +52,7 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
     if (circuitBreaker && !circuitBreaker.allowRequest()) {
       log.warn({ secretId }, 'Circuit breaker is open. Checking stale cache...');
 
-      // Attempt stale serve from cache (cache may still have the entry even if expired in stats)
+      // Attempt stale serve from cache
       if (cache) {
         const stale = cache.get(secretId);
         if (stale !== undefined) {
@@ -80,6 +81,11 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
       // Record success for circuit breaker
       if (circuitBreaker) {
         circuitBreaker.recordSuccess();
+      }
+
+      // Notify health router of upstream success
+      if (onUpstreamSuccess) {
+        onUpstreamSuccess();
       }
 
       return res.status(200).json(result);

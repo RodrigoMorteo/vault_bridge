@@ -45,6 +45,13 @@ function buildApp({
   // Create metrics
   const { router: metricsRouter, instruments } = createMetricsRouter();
 
+  // Create health router with deep probe dependencies
+  const healthRouter = createHealthRouter({
+    isReady,
+    cache,
+    circuitBreaker,
+  });
+
   // Attach request ID and child logger to every request
   app.use(createRequestIdMiddleware({ logger: log }));
 
@@ -95,7 +102,7 @@ function buildApp({
   }));
 
   // Routes
-  app.use(createHealthRouter({ isReady }));
+  app.use(healthRouter);
   app.use(metricsRouter);
   app.use(createVaultRouter({
     client,
@@ -105,6 +112,7 @@ function buildApp({
     attemptReauth,
     instruments,
     logger: log,
+    onUpstreamSuccess: () => healthRouter.recordUpstreamSuccess && healthRouter.recordUpstreamSuccess(),
   }));
 
   return app;

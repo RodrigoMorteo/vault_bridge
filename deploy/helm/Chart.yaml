@@ -1,0 +1,8 @@
+apiVersion: v2
+name: bws-vault-bridge
+description: Helm chart for BWS Vault Bridge — internal Bitwarden Secrets Manager proxy
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: Rodrigo Morteo
