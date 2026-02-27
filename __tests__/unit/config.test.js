@@ -1,7 +1,6 @@
 const { loadConfig } = require('../../src/config');
 
 describe('config module', () => {
-  // Store original process.exit and replace with a mock
   let mockExit;
   let mockConsoleError;
 
@@ -26,6 +25,10 @@ describe('config module', () => {
       bwsStateFile: '/tmp/bws_state.json',
       cacheTtl: 60,
       logLevel: 'info',
+      circuitBreakerThreshold: 5,
+      circuitBreakerCooldown: 30,
+      gatewayAuthEnabled: false,
+      gatewayAuthSecret: '',
     });
     expect(Object.isFrozen(config)).toBe(true);
   });
@@ -37,6 +40,10 @@ describe('config module', () => {
       BWS_STATE_FILE: '/var/run/bws_state.json',
       CACHE_TTL: '120',
       LOG_LEVEL: 'debug',
+      CIRCUIT_BREAKER_THRESHOLD: '3',
+      CIRCUIT_BREAKER_COOLDOWN: '60',
+      GATEWAY_AUTH_ENABLED: 'true',
+      GATEWAY_AUTH_SECRET: 'my-secret',
     });
 
     expect(config).toEqual({
@@ -45,6 +52,10 @@ describe('config module', () => {
       bwsStateFile: '/var/run/bws_state.json',
       cacheTtl: 120,
       logLevel: 'debug',
+      circuitBreakerThreshold: 3,
+      circuitBreakerCooldown: 60,
+      gatewayAuthEnabled: true,
+      gatewayAuthSecret: 'my-secret',
     });
   });
 
@@ -89,13 +100,35 @@ describe('config module', () => {
     );
   });
 
+  test('exits with code 1 when CIRCUIT_BREAKER_THRESHOLD is invalid', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      CIRCUIT_BREAKER_THRESHOLD: 'bad',
+    })).toThrow('process.exit called');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('CIRCUIT_BREAKER_THRESHOLD must be a positive integer')
+    );
+  });
+
+  test('exits with code 1 when CIRCUIT_BREAKER_COOLDOWN is invalid', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      CIRCUIT_BREAKER_COOLDOWN: 'bad',
+    })).toThrow('process.exit called');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('CIRCUIT_BREAKER_COOLDOWN must be a non-negative number')
+    );
+  });
+
   test('reports multiple errors at once', () => {
     expect(() => loadConfig({
       PORT: 'bad',
       CACHE_TTL: 'bad',
     })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    // Should report all three errors: missing token, bad port, bad cache ttl
+    // Should report: missing token, bad port, bad cache ttl
     expect(mockConsoleError).toHaveBeenCalledTimes(4); // 1 header + 3 errors
   });
 
@@ -113,5 +146,18 @@ describe('config module', () => {
       CACHE_TTL: '0',
     });
     expect(config.cacheTtl).toBe(0);
+  });
+
+  test('GATEWAY_AUTH_ENABLED defaults to false', () => {
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'token' });
+    expect(config.gatewayAuthEnabled).toBe(false);
+  });
+
+  test('GATEWAY_AUTH_ENABLED parses "true" correctly', () => {
+    const config = loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      GATEWAY_AUTH_ENABLED: 'true',
+    });
+    expect(config.gatewayAuthEnabled).toBe(true);
   });
 });

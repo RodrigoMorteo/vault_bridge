@@ -13,11 +13,15 @@
 
 /**
  * @typedef {Object} AppConfig
- * @property {string}  bwsAccessToken - BWS machine-account access token.
- * @property {number}  port           - HTTP port for the service.
- * @property {string}  bwsStateFile   - Path to Bitwarden SDK state file.
- * @property {number}  cacheTtl       - Cache time-to-live in seconds.
- * @property {string}  logLevel       - Logging level (trace|debug|info|warn|error|fatal).
+ * @property {string}  bwsAccessToken           - BWS machine-account access token.
+ * @property {number}  port                      - HTTP port for the service.
+ * @property {string}  bwsStateFile              - Path to Bitwarden SDK state file.
+ * @property {number}  cacheTtl                  - Cache time-to-live in seconds.
+ * @property {string}  logLevel                  - Logging level.
+ * @property {number}  circuitBreakerThreshold   - Consecutive failures to trip circuit.
+ * @property {number}  circuitBreakerCooldown    - Cooldown period in seconds.
+ * @property {boolean} gatewayAuthEnabled        - Whether gateway auth is enforced.
+ * @property {string}  gatewayAuthSecret         - Shared secret for gateway auth (when gateway disabled).
  */
 
 const VALID_LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
@@ -59,6 +63,23 @@ function loadConfig(env = process.env) {
     errors.push(`LOG_LEVEL must be one of [${VALID_LOG_LEVELS.join(', ')}]. Got: "${env.LOG_LEVEL}".`);
   }
 
+  // --- Circuit breaker config ---
+  const rawCbThreshold = env.CIRCUIT_BREAKER_THRESHOLD || '5';
+  const circuitBreakerThreshold = Number(rawCbThreshold);
+  if (Number.isNaN(circuitBreakerThreshold) || circuitBreakerThreshold < 1) {
+    errors.push(`CIRCUIT_BREAKER_THRESHOLD must be a positive integer. Got: "${rawCbThreshold}".`);
+  }
+
+  const rawCbCooldown = env.CIRCUIT_BREAKER_COOLDOWN || '30';
+  const circuitBreakerCooldown = Number(rawCbCooldown);
+  if (Number.isNaN(circuitBreakerCooldown) || circuitBreakerCooldown < 0) {
+    errors.push(`CIRCUIT_BREAKER_COOLDOWN must be a non-negative number. Got: "${rawCbCooldown}".`);
+  }
+
+  // --- Gateway auth config ---
+  const gatewayAuthEnabled = (env.GATEWAY_AUTH_ENABLED || 'false').toLowerCase() === 'true';
+  const gatewayAuthSecret = env.GATEWAY_AUTH_SECRET || '';
+
   // --- Fail-fast on validation errors ---
   if (errors.length > 0) {
     console.error('FATAL: Configuration validation failed:');
@@ -72,6 +93,10 @@ function loadConfig(env = process.env) {
     bwsStateFile,
     cacheTtl,
     logLevel,
+    circuitBreakerThreshold,
+    circuitBreakerCooldown,
+    gatewayAuthEnabled,
+    gatewayAuthSecret,
   });
 }
 

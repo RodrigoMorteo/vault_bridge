@@ -69,6 +69,10 @@ The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This
 | `BWS_STATE_FILE` | Path to store SDK state. | `/tmp/bws_state.json` | No |
 | `CACHE_TTL` | Cache time-to-live in seconds. | `60` | No |
 | `LOG_LEVEL` | Logging level (`trace`, `debug`, `info`, `warn`, `error`, `fatal`). | `info` | No |
+| `CIRCUIT_BREAKER_THRESHOLD` | Consecutive upstream failures to trip the circuit breaker. | `5` | No |
+| `CIRCUIT_BREAKER_COOLDOWN` | Seconds to wait before half-open probe. | `30` | No |
+| `GATEWAY_AUTH_ENABLED` | Enable gateway header validation (`true`/`false`). | `false` | No |
+| `GATEWAY_AUTH_SECRET` | Shared secret for local dev auth (when gateway disabled). | - | No |
 
 All configuration is centralized in `src/config/index.js`. The application validates all variables at startup and exits with code 1 on invalid or missing required values.
 
@@ -126,13 +130,22 @@ The `:id` parameter must be a valid UUID v4 string.
 - **503** `{ error: "Vault client not ready." }` — SDK not initialized or re-authentication in progress.
 - **500** `{ error: "Failed to retrieve secret from vault." }` — unexpected/unclassified error.
 
+When the circuit breaker is open and a cached value is available, the response includes a `X-Degraded-Mode: true` header.
+
+### GET `/metrics`
+- **200** — Prometheus exposition format. Includes: `http_requests_total`, `http_request_duration_seconds`, `cache_hits_total`, `cache_misses_total`, `circuit_breaker_state`.
+- Exempt from gateway authentication.
+
 ## Operational Notes
 - All logs are structured JSON (Pino) with automatic redaction of sensitive fields (`key`, `value`, `token`, `authorization`, `BWS_ACCESS_TOKEN`).
 - Each request is assigned a unique `requestId` (or forwarded from `X-Request-Id` header).
 - In-memory TTL cache reduces upstream API calls; configurable via `CACHE_TTL`.
+- Circuit breaker protects against upstream failures: opens after `CIRCUIT_BREAKER_THRESHOLD` consecutive failures, serves stale cache when possible, probes after `CIRCUIT_BREAKER_COOLDOWN` seconds.
+- Gateway auth (`GATEWAY_AUTH_ENABLED`): when enabled, validates `Authorization: Bearer <token>` on `/vault/*` routes. When disabled with `GATEWAY_AUTH_SECRET` set, validates a fixed shared secret.
 - Proactive token lifecycle: on auth errors the bridge attempts re-authentication; if it fails, `/health` returns 503 triggering orchestrator restart.
+- State file (`BWS_STATE_FILE`) is securely zeroed and deleted on shutdown. Stale files from prior crashes are cleaned at startup.
 - Process exits on initial Bitwarden authentication failure to avoid stale state.
-- Graceful shutdown clears the cache and closes connections on `SIGTERM`/`SIGINT`.
+- Graceful shutdown clears the cache, securely deletes the state file, and closes connections on `SIGTERM`/`SIGINT`.
 
 ## Contributing
 Please read our [Contribution Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.  
