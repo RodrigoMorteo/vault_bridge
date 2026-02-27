@@ -16,6 +16,10 @@ RUN npm prune --omit=dev
 
 # Stage 2: Runtime
 FROM node:lts-slim
+
+# Install ca-certificates for HTTPS (required by rustls)
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy only necessary files from builder
