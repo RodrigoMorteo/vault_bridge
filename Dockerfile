@@ -26,6 +26,7 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/index.js ./
+COPY --from=builder /app/src ./src
 
 # Create a non-root user for security (node image provides 'node' user)
 USER node

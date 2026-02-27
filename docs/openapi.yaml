@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: BWS Vault Bridge API
+  description: |
+    Internal Bitwarden Secrets Manager bridge for MCP consumers.
+    Handles plaintext secrets under strict security boundaries.
+  version: 1.0.0
+  contact:
+    name: Rodrigo Morteo
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: |
+        Liveness and readiness probe endpoint.
+        - Shallow (default): returns simple status.
+        - Deep (`?deep=true`): returns structured dependency health.
+      operationId: healthCheck
+      tags:
+        - Operations
+      parameters:
+        - name: deep
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ['true']
+          description: Enable deep probe mode for readiness checks.
+      responses:
+        '200':
+          description: Service is healthy or degraded.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HealthShallow'
+                  - $ref: '#/components/schemas/HealthDeep'
+        '503':
+          description: Service is unavailable.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HealthShallow'
+                  - $ref: '#/components/schemas/HealthDeep'
+
+  /vault/secret/{id}:
+    get:
+      summary: Retrieve a single secret
+      description: |
+        Fetches a decrypted secret from Bitwarden Secrets Manager by ID.
+        Results are served from in-memory cache when available.
+      operationId: getSecret
+      tags:
+        - Vault
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID v4 of the secret to retrieve.
+      responses:
+        '200':
+          description: Secret retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Secret'
+          headers:
+            X-Degraded-Mode:
+              schema:
+                type: string
+                enum: ['true']
+              description: Present when serving stale cache (circuit breaker open).
+        '400':
+          description: Invalid secret ID format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid secret ID format. Expected UUID v4."
+        '404':
+          description: Secret not found in Bitwarden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Secret not found."
+        '502':
+          description: Upstream Bitwarden API unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Upstream vault service unavailable."
+        '503':
+          description: Vault client not ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Vault client not ready."
+        '500':
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Failed to retrieve secret from vault."
+
+  /vault/secrets:
+    post:
+      summary: Retrieve multiple secrets (bulk)
+      description: |
+        Fetches multiple secrets in a single request. Leverages cache for
+        already-cached secrets. Returns partial results with errors array
+        for any IDs that could not be resolved.
+      operationId: getSecretsBulk
+      tags:
+        - Vault
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: BULK_MAX_IDS
+          in: header
+          required: false
+          description: |
+            The maximum number of IDs is controlled by the BULK_MAX_IDS
+            environment variable (default: 50). This is not a request header
+            but a server-side configuration.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkRequest'
+      responses:
+        '200':
+          description: Bulk retrieval result (may contain partial errors).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResponse'
+        '400':
+          description: Invalid request body or ID format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Vault client not ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: |
+        Exposes operational metrics in Prometheus exposition format.
+        Exempt from gateway authentication.
+      operationId: getMetrics
+      tags:
+        - Operations
+      responses:
+        '200':
+          description: Prometheus metrics in text format.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        JWT from APISix gateway (when GATEWAY_AUTH_ENABLED=true) or
+        shared secret (when GATEWAY_AUTH_ENABLED=false with GATEWAY_AUTH_SECRET set).
+
+  schemas:
+    Secret:
+      type: object
+      required: [id, key, value]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Secret UUID.
+        key:
+          type: string
+          description: Secret key/name.
+        value:
+          type: string
+          description: Decrypted secret value.
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Opaque error message.
+
+    BulkRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          description: |
+            Array of secret UUIDs to retrieve. Maximum number of IDs is
+            configurable via the BULK_MAX_IDS environment variable (default: 50).
+
+    BulkResponse:
+      type: object
+      properties:
+        secrets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Secret'
+          description: Successfully resolved secrets.
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              status:
+                type: integer
+              error:
+                type: string
+          description: IDs that could not be resolved, with status codes.
+
+    HealthShallow:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+
+    HealthDeep:
+      type: object
+      required: [status, dependencies]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable]
+        dependencies:
+          type: object
+          properties:
+            bitwarden_session:
+              type: string
+              enum: [active, expired]
+            cache:
+              type: string
+              enum: [enabled, disabled]
+            cache_size:
+              type: integer
+            circuit_breaker:
+              type: string
+              enum: [closed, open, half-open, unknown]
+            last_upstream_success:
+              type: string
+              format: date-time
+              nullable: true
