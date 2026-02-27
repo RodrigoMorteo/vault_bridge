@@ -18,6 +18,27 @@ Internal Bitwarden Secrets Manager bridge for MCP consumers. Handles plaintext s
 ## Overview
 A minimal Express.js microservice that proxies secret retrieval from Bitwarden Secrets Manager (BWS) to an MCP client. Designed for internal-only use.
 
+### Project Structure
+```
+vault_bridge/
+├── index.js                     ← Thin bootstrap (delegates to src/)
+├── src/
+│   ├── app.js                   ← Express app assembly (composition root)
+│   ├── server.js                ← HTTP server bootstrap + shutdown
+│   ├── config/                  ← Centralized configuration (planned)
+│   ├── middleware/               ← Shared middleware (planned)
+│   ├── routes/
+│   │   ├── health.js            ← Health check route
+│   │   └── vault.js             ← Secret retrieval route
+│   ├── services/
+│   │   └── bitwardenClient.js   ← Bitwarden SDK wrapper
+│   └── utils/                   ← Shared utilities (planned)
+├── __tests__/
+│   └── integration/
+│       └── vault.test.js        ← Integration tests (HTTP behavior)
+└── docs/                        ← Architecture & planning documents
+```
+
 ## Architecture & Security Constraints
 - Never log, print, or expose secret `key`/`value` or `BWS_ACCESS_TOKEN`.
 - Fail fast if Bitwarden SDK auth fails or state is lost.
@@ -44,8 +65,12 @@ The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This
 | Variable | Description | Default | Required |
 | :--- | :--- | :--- | :--- |
 | `BWS_ACCESS_TOKEN` | Machine account access token. | - | **Yes** |
-| `PORT` | HTTP port for the service. (For Docker Compose, this sets the external listening port). | `3000` | No |
+| `PORT` | HTTP port for the service (1–65535). | `3000` | No |
 | `BWS_STATE_FILE` | Path to store SDK state. | `/tmp/bws_state.json` | No |
+| `CACHE_TTL` | Cache time-to-live in seconds. | `60` | No |
+| `LOG_LEVEL` | Logging level (`trace`, `debug`, `info`, `warn`, `error`, `fatal`). | `info` | No |
+
+All configuration is centralized in `src/config/index.js`. The application validates all variables at startup and exits with code 1 on invalid or missing required values.
 
 ## Running
 Ensure you have Node.js LTS installed and dependencies (`npm install`) are ready.
