@@ -44,7 +44,7 @@ The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This
 | Variable | Description | Default | Required |
 | :--- | :--- | :--- | :--- |
 | `BWS_ACCESS_TOKEN` | Machine account access token. | - | **Yes** |
-| `PORT` | HTTP port for the service. | `3000` | No |
+| `PORT` | HTTP port for the service. (For Docker Compose, this sets the external listening port). | `3000` | No |
 | `BWS_STATE_FILE` | Path to store SDK state. | `/tmp/bws_state.json` | No |
 
 ## Running
@@ -64,8 +64,18 @@ npm start
 
 ### Docker (Example)
 ```bash
-docker run -e BWS_ACCESS_TOKEN="<your_machine_account_access_token>" -p 3000:3000 my-vault-bridge
+docker run -e BWS_ACCESS_TOKEN="<your_machine_account_access_token>" -p 3000:3000 bws-vault-bridge
 ```
+
+### Docker Compose (Portainer)
+This project includes a `docker-compose.yml` for easy deployment.
+1. Set `BWS_ACCESS_TOKEN` in your environment (or `.env` file).
+2. Optionally set `PORT` to change the external listening port (default: 3000).
+3. Run:
+   ```bash
+   docker-compose up -d
+   ```
+
 
 
 ## Testing
