@@ -12,9 +12,9 @@ services:
       - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN:-your_access_token_here}
       - PORT=3000
       - BWS_STATE_FILE=/tmp/bws_state.json
-    volumes:
+    #volumes:
       # Optional: Persist the SDK state file to avoid re-auth on restart
-      - bws_state:/tmp
+    #  - bws_state:/tmp
     # Security: Run as non-root user (defined in Dockerfile)
     user: "1000:1000"
     read_only: true
