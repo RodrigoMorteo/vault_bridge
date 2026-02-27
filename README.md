@@ -73,6 +73,7 @@ The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This
 | `CIRCUIT_BREAKER_COOLDOWN` | Seconds to wait before half-open probe. | `30` | No |
 | `GATEWAY_AUTH_ENABLED` | Enable gateway header validation (`true`/`false`). | `false` | No |
 | `GATEWAY_AUTH_SECRET` | Shared secret for local dev auth (when gateway disabled). | - | No |
+| `LOG_RETENTION_DAYS` | Log retention period in days (for compliance metadata). | `90` | No |
 
 All configuration is centralized in `src/config/index.js`. The application validates all variables at startup and exits with code 1 on invalid or missing required values.
 
@@ -143,6 +144,18 @@ The `:id` parameter must be a valid UUID v4 string.
 - **500** `{ error: "Failed to retrieve secret from vault." }` — unexpected/unclassified error.
 
 When the circuit breaker is open and a cached value is available, the response includes a `X-Degraded-Mode: true` header.
+
+### POST `/vault/secrets`
+
+Bulk secret retrieval. Accepts an array of UUID v4 IDs and returns all resolved secrets in a single response.
+
+**Request body:** `{ "ids": ["uuid1", "uuid2", ...] }` (maximum 50 IDs).
+
+- **200** `{ "secrets": [...], "errors": [...] }` — partial results with any errors listed separately.
+- **400** — missing/empty `ids` array, exceeding 50 IDs, or invalid UUID format.
+- **503** `{ error: "Vault client not ready." }` — SDK not initialized.
+
+Cached secrets are served without upstream calls. Uncached secrets are fetched individually.
 
 ### GET `/metrics`
 - **200** — Prometheus exposition format. Includes: `http_requests_total`, `http_request_duration_seconds`, `cache_hits_total`, `cache_misses_total`, `circuit_breaker_state`.
