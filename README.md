@@ -116,14 +116,23 @@ Tests mock `@bitwarden/sdk-napi`; no live Bitwarden access is required.
 - **503** `{ "status": "unavailable" }` when not ready.
 
 ### GET `/vault/secret/:id`
-- **200** `{ id, key, value }` — plaintext secret fields from BWS.
-- **503** `{ error: "Vault client not ready" }` if SDK not initialized.
-- **500** `{ error: "Failed to retrieve secret from vault." }` on masked retrieval errors.
+
+The `:id` parameter must be a valid UUID v4 string.
+
+- **200** `{ id, key, value }` — plaintext secret fields from BWS. Served from in-memory cache if within TTL.
+- **400** `{ error: "Invalid secret ID format. Expected UUID v4." }` — malformed `:id` parameter.
+- **404** `{ error: "Secret not found." }` — valid UUID but secret does not exist in Bitwarden.
+- **502** `{ error: "Upstream vault service unavailable." }` — Bitwarden API unreachable, timeout, auth error, or rate limit.
+- **503** `{ error: "Vault client not ready." }` — SDK not initialized or re-authentication in progress.
+- **500** `{ error: "Failed to retrieve secret from vault." }` — unexpected/unclassified error.
 
 ## Operational Notes
-- Do not emit secrets or tokens in logs.
-- Process exits on failed Bitwarden authentication to avoid stale state.
-- Graceful shutdown is wired for `SIGTERM`/`SIGINT`.
+- All logs are structured JSON (Pino) with automatic redaction of sensitive fields (`key`, `value`, `token`, `authorization`, `BWS_ACCESS_TOKEN`).
+- Each request is assigned a unique `requestId` (or forwarded from `X-Request-Id` header).
+- In-memory TTL cache reduces upstream API calls; configurable via `CACHE_TTL`.
+- Proactive token lifecycle: on auth errors the bridge attempts re-authentication; if it fails, `/health` returns 503 triggering orchestrator restart.
+- Process exits on initial Bitwarden authentication failure to avoid stale state.
+- Graceful shutdown clears the cache and closes connections on `SIGTERM`/`SIGINT`.
 
 ## Contributing
 Please read our [Contribution Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.  

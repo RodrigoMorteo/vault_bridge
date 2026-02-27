@@ -1,7 +1,10 @@
 /**
  * @module services/bitwardenClient
- * @description Bitwarden SDK client wrapper. Handles authentication and
- *   exposes the initialized client for secret retrieval operations.
+ * @description Bitwarden SDK client wrapper. Handles authentication,
+ *   exposes the initialized client for secret retrieval operations,
+ *   and provides proactive token lifecycle management (re-authentication
+ *   on expiry).
+ *
  *   Dependency: @bitwarden/sdk-napi (native N-API binding).
  */
 
@@ -13,6 +16,12 @@ let client = null;
 
 /** @type {boolean} */
 let isClientReady = false;
+
+/** @type {boolean} - Mutex flag to prevent concurrent re-auth attempts. */
+let isReauthenticating = false;
+
+/** @type {{ accessToken: string, stateFile: string, logger: any }|null} */
+let authConfig = null;
 
 /**
  * Authenticates with Bitwarden Secrets Manager using a machine-account
@@ -32,6 +41,9 @@ async function initBitwarden({ accessToken, stateFile, logger }) {
     log.error('FATAL: BWS_ACCESS_TOKEN environment variable is missing.');
     process.exit(1);
   }
+
+  // Store config for re-authentication
+  authConfig = { accessToken, stateFile, logger: log };
 
   try {
     const bwClient = new BitwardenClient(
@@ -55,6 +67,47 @@ async function initBitwarden({ accessToken, stateFile, logger }) {
 }
 
 /**
+ * Attempts re-authentication after detecting an expired or invalid token.
+ * Uses a mutex flag to prevent concurrent re-auth attempts.
+ *
+ * @returns {Promise<boolean>} True if re-auth succeeded, false otherwise.
+ */
+async function attemptReauth() {
+  if (!authConfig) return false;
+  if (isReauthenticating) return false;
+
+  const log = authConfig.logger || console;
+
+  isReauthenticating = true;
+  isClientReady = false;
+
+  try {
+    log.warn('Token expired or invalid. Attempting re-authentication...');
+
+    const bwClient = new BitwardenClient(
+      {
+        apiUrl: 'https://api.bitwarden.com',
+        identityUrl: 'https://identity.bitwarden.com',
+        deviceType: DeviceType.SDK,
+      },
+      LogLevel.Info,
+    );
+
+    await bwClient.auth().loginAccessToken(authConfig.accessToken, authConfig.stateFile);
+    client = bwClient;
+    isClientReady = true;
+    isReauthenticating = false;
+    log.info('Re-authentication successful.');
+    return true;
+  } catch (err) {
+    log.error({ err }, 'Re-authentication failed. Service degraded.');
+    isClientReady = false;
+    isReauthenticating = false;
+    return false;
+  }
+}
+
+/**
  * Returns the current Bitwarden client instance.
  * @returns {BitwardenClient|null}
  */
@@ -70,8 +123,30 @@ function getIsClientReady() {
   return isClientReady;
 }
 
+/**
+ * Returns whether a re-authentication is currently in progress.
+ * @returns {boolean}
+ */
+function getIsReauthenticating() {
+  return isReauthenticating;
+}
+
+/**
+ * Resets internal state. For testing only.
+ * @private
+ */
+function _resetForTesting() {
+  client = null;
+  isClientReady = false;
+  isReauthenticating = false;
+  authConfig = null;
+}
+
 module.exports = {
   initBitwarden,
+  attemptReauth,
   getClient,
   getIsClientReady,
+  getIsReauthenticating,
+  _resetForTesting,
 };

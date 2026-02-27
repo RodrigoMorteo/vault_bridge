@@ -15,13 +15,15 @@ const { createLogger } = require('./utils/logger');
  * Builds and returns the configured Express application.
  *
  * @param {Object}   deps
- * @param {Object}   deps.client    - Bitwarden SDK client instance.
- * @param {Function} [deps.isReady] - Returns true when the vault client is ready.
+ * @param {Object}   deps.client         - Bitwarden SDK client instance.
+ * @param {Function} [deps.isReady]      - Returns true when the vault client is ready.
+ * @param {Object}   [deps.cache]        - TTL cache instance (optional).
+ * @param {Function} [deps.attemptReauth] - Re-auth function for token lifecycle (optional).
  * @param {import('pino').Logger} [deps.logger] - Logger instance (auto-created if not provided).
- * @param {string}   [deps.logLevel] - Log level for auto-created logger.
+ * @param {string}   [deps.logLevel]     - Log level for auto-created logger.
  * @returns {express.Application}
  */
-function buildApp({ client, isReady = () => true, logger, logLevel = 'info' }) {
+function buildApp({ client, isReady = () => true, cache, attemptReauth, logger, logLevel = 'info' }) {
   const app = express();
   const log = logger || createLogger({ level: logLevel });
 
@@ -43,7 +45,7 @@ function buildApp({ client, isReady = () => true, logger, logLevel = 'info' }) {
   });
 
   app.use(createHealthRouter({ isReady }));
-  app.use(createVaultRouter({ client, isReady, logger: log }));
+  app.use(createVaultRouter({ client, isReady, cache, attemptReauth, logger: log }));
 
   return app;
 }
