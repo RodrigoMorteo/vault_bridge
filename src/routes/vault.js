@@ -15,7 +15,7 @@ const { createValidateSecretId } = require('../middleware/validateSecretId');
 const { classifyError } = require('../utils/errorClassifier');
 const { UUID_V4_REGEX } = require('../middleware/validateSecretId');
 
-const MAX_BULK_IDS = 50;
+const DEFAULT_BULK_MAX_IDS = 50;
 
 /**
  * Creates the vault routes router.
@@ -28,10 +28,12 @@ const MAX_BULK_IDS = 50;
  * @param {Function} [deps.attemptReauth]   - Re-auth function for token lifecycle (optional).
  * @param {Object}   [deps.instruments]     - Prometheus instruments (optional).
  * @param {Function} [deps.onUpstreamSuccess] - Callback on successful upstream call (optional).
+ * @param {number}   [deps.bulkMaxIds]      - Maximum IDs per bulk request (default: 50).
  * @param {import('pino').Logger} [deps.logger] - Logger instance.
  * @returns {express.Router}
  */
-function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReauth, instruments, onUpstreamSuccess, logger }) {
+function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReauth, instruments, onUpstreamSuccess, bulkMaxIds, logger }) {
+  const maxBulkIds = bulkMaxIds || DEFAULT_BULK_MAX_IDS;
   const router = express.Router();
   const validateSecretId = createValidateSecretId();
 
@@ -111,8 +113,8 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
       return res.status(400).json({ error: 'Request body must contain a non-empty "ids" array.' });
     }
 
-    if (ids.length > MAX_BULK_IDS) {
-      return res.status(400).json({ error: `Maximum ${MAX_BULK_IDS} IDs per request.` });
+    if (ids.length > maxBulkIds) {
+      return res.status(400).json({ error: `Maximum ${maxBulkIds} IDs per request.` });
     }
 
     // Validate each ID is UUID v4
@@ -174,4 +176,4 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
   return router;
 }
 
-module.exports = { createVaultRouter, MAX_BULK_IDS };
+module.exports = { createVaultRouter, DEFAULT_BULK_MAX_IDS };

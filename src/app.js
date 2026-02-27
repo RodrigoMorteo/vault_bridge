@@ -24,6 +24,7 @@ const { createLogger } = require('./utils/logger');
  * @param {Function} [deps.attemptReauth]     - Re-auth function for token lifecycle.
  * @param {boolean}  [deps.gatewayAuthEnabled] - Whether gateway auth is enforced.
  * @param {string}   [deps.gatewayAuthSecret]  - Shared secret for local auth.
+ * @param {number}   [deps.bulkMaxIds]        - Maximum IDs per bulk request.
  * @param {import('pino').Logger} [deps.logger] - Logger instance.
  * @param {string}   [deps.logLevel]          - Log level for auto-created logger.
  * @returns {express.Application}
@@ -36,6 +37,7 @@ function buildApp({
   attemptReauth,
   gatewayAuthEnabled = false,
   gatewayAuthSecret = '',
+  bulkMaxIds,
   logger,
   logLevel = 'info',
 }) {
@@ -111,6 +113,7 @@ function buildApp({
     circuitBreaker,
     attemptReauth,
     instruments,
+    bulkMaxIds,
     logger: log,
     onUpstreamSuccess: () => healthRouter.recordUpstreamSuccess && healthRouter.recordUpstreamSuccess(),
   }));

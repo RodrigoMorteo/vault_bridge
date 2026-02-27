@@ -25,6 +25,7 @@ describe('config module', () => {
       bwsStateFile: '/tmp/bws_state.json',
       cacheTtl: 60,
       logLevel: 'info',
+      bulkMaxIds: 50,
       circuitBreakerThreshold: 5,
       circuitBreakerCooldown: 30,
       gatewayAuthEnabled: false,
@@ -40,6 +41,7 @@ describe('config module', () => {
       BWS_STATE_FILE: '/var/run/bws_state.json',
       CACHE_TTL: '120',
       LOG_LEVEL: 'debug',
+      BULK_MAX_IDS: '100',
       CIRCUIT_BREAKER_THRESHOLD: '3',
       CIRCUIT_BREAKER_COOLDOWN: '60',
       GATEWAY_AUTH_ENABLED: 'true',
@@ -52,6 +54,7 @@ describe('config module', () => {
       bwsStateFile: '/var/run/bws_state.json',
       cacheTtl: 120,
       logLevel: 'debug',
+      bulkMaxIds: 100,
       circuitBreakerThreshold: 3,
       circuitBreakerCooldown: 60,
       gatewayAuthEnabled: true,
@@ -97,6 +100,17 @@ describe('config module', () => {
     expect(mockExit).toHaveBeenCalledWith(1);
     expect(mockConsoleError).toHaveBeenCalledWith(
       expect.stringContaining('LOG_LEVEL must be one of')
+    );
+  });
+
+  test('exits with code 1 when BULK_MAX_IDS is invalid', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      BULK_MAX_IDS: 'bad',
+    })).toThrow('process.exit called');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('BULK_MAX_IDS must be a positive integer')
     );
   });
 

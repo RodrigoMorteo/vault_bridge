@@ -73,6 +73,7 @@ The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This
 | `CIRCUIT_BREAKER_COOLDOWN` | Seconds to wait before half-open probe. | `30` | No |
 | `GATEWAY_AUTH_ENABLED` | Enable gateway header validation (`true`/`false`). | `false` | No |
 | `GATEWAY_AUTH_SECRET` | Shared secret for local dev auth (when gateway disabled). | - | No |
+| `BULK_MAX_IDS` | Maximum number of secret IDs per bulk retrieval request. | `50` | No |
 | `LOG_RETENTION_DAYS` | Log retention period in days (for compliance metadata). | `90` | No |
 
 All configuration is centralized in `src/config/index.js`. The application validates all variables at startup and exits with code 1 on invalid or missing required values.
@@ -149,7 +150,7 @@ When the circuit breaker is open and a cached value is available, the response i
 
 Bulk secret retrieval. Accepts an array of UUID v4 IDs and returns all resolved secrets in a single response.
 
-**Request body:** `{ "ids": ["uuid1", "uuid2", ...] }` (maximum 50 IDs).
+**Request body:** `{ "ids": ["uuid1", "uuid2", ...] }` (maximum configurable via `BULK_MAX_IDS`, default: 50).
 
 - **200** `{ "secrets": [...], "errors": [...] }` — partial results with any errors listed separately.
 - **400** — missing/empty `ids` array, exceeding 50 IDs, or invalid UUID format.

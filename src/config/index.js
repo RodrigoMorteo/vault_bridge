@@ -63,6 +63,13 @@ function loadConfig(env = process.env) {
     errors.push(`LOG_LEVEL must be one of [${VALID_LOG_LEVELS.join(', ')}]. Got: "${env.LOG_LEVEL}".`);
   }
 
+  // --- Bulk retrieval config ---
+  const rawBulkMaxIds = env.BULK_MAX_IDS || '50';
+  const bulkMaxIds = Number(rawBulkMaxIds);
+  if (Number.isNaN(bulkMaxIds) || !Number.isInteger(bulkMaxIds) || bulkMaxIds < 1) {
+    errors.push(`BULK_MAX_IDS must be a positive integer. Got: "${rawBulkMaxIds}".`);
+  }
+
   // --- Circuit breaker config ---
   const rawCbThreshold = env.CIRCUIT_BREAKER_THRESHOLD || '5';
   const circuitBreakerThreshold = Number(rawCbThreshold);
@@ -93,6 +100,7 @@ function loadConfig(env = process.env) {
     bwsStateFile,
     cacheTtl,
     logLevel,
+    bulkMaxIds,
     circuitBreakerThreshold,
     circuitBreakerCooldown,
     gatewayAuthEnabled,
