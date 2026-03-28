@@ -40,14 +40,15 @@ const VALID_LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
  * @returns {Readonly<AppConfig>} Frozen configuration object.
  * @throws {Error} Logs error and calls process.exit(1) on validation failure.
  */
-function loadConfig(envSource = process.env) {
+function loadConfig(envSource = process.env, options = {}) {
   const errors = [];
   const logs = [];
+  const skipDotEnv = options.skipDotEnv || false;
 
-  // Load .env file if it exists
+  // Load .env file if it exists and not skipped
   const envPath = path.resolve(process.cwd(), '.env');
   let dotEnvConfig = {};
-  if (fs.existsSync(envPath)) {
+  if (!skipDotEnv && fs.existsSync(envPath)) {
     const result = dotenv.config({ path: envPath });
     if (!result.error) {
       dotEnvConfig = result.parsed;
