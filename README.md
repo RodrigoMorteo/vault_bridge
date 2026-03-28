@@ -59,9 +59,16 @@ npm install
 ```
 
 ## Configuration
-The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This token corresponds to a Bitwarden Machine Account.
+The service supports configuration via a `.env` file, environment variables, or hardcoded defaults.
 
-### Environment Variables
+**Loading Priority:**
+1.  `.env` file (highest)
+2.  Environment variables
+3.  Hardcoded defaults (lowest)
+
+The application logs the source of each variable at startup. The `BWS_ACCESS_TOKEN` is the only **required** variable and has no default.
+
+### Configuration Variables
 | Variable | Description | Default | Required |
 | :--- | :--- | :--- | :--- |
 | `BWS_ACCESS_TOKEN` | Machine account access token. | - | **Yes** |
@@ -75,6 +82,8 @@ The service requires the `BWS_ACCESS_TOKEN` environment variable to be set. This
 | `GATEWAY_AUTH_SECRET` | Shared secret for local dev auth (when gateway disabled). | - | No |
 | `BULK_MAX_IDS` | Maximum number of secret IDs per bulk retrieval request. | `50` | No |
 | `LOG_RETENTION_DAYS` | Log retention period in days (for compliance metadata). | `90` | No |
+| `RATE_LIMIT_WINDOW_MS` | Rate limit window in milliseconds. | `900000` (15m) | No |
+| `RATE_LIMIT_MAX_REQUESTS` | Max requests per window for `/vault/*` routes. | `100` | No |
 
 All configuration is centralized in `src/config/index.js`. The application validates all variables at startup and exits with code 1 on invalid or missing required values.
 
@@ -167,6 +176,7 @@ Cached secrets are served without upstream calls. Uncached secrets are fetched i
 - Each request is assigned a unique `requestId` (or forwarded from `X-Request-Id` header).
 - In-memory TTL cache reduces upstream API calls; configurable via `CACHE_TTL`.
 - Circuit breaker protects against upstream failures: opens after `CIRCUIT_BREAKER_THRESHOLD` consecutive failures, serves stale cache when possible, probes after `CIRCUIT_BREAKER_COOLDOWN` seconds.
+- Rate limiting: enforced on all `/vault/*` routes using `express-rate-limit`. Configurable via `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX_REQUESTS`. Operational endpoints (`/health`, `/metrics`) are exempt.
 - Gateway auth (`GATEWAY_AUTH_ENABLED`): when enabled, validates `Authorization: Bearer <token>` on `/vault/*` routes. When disabled with `GATEWAY_AUTH_SECRET` set, validates a fixed shared secret.
 - Proactive token lifecycle: on auth errors the bridge attempts re-authentication; if it fails, `/health` returns 503 triggering orchestrator restart.
 - State file (`BWS_STATE_FILE`) is securely zeroed and deleted on shutdown. Stale files from prior crashes are cleaned at startup.

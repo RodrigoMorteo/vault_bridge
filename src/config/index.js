@@ -11,6 +11,10 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+
 /**
  * @typedef {Object} AppConfig
  * @property {string}  bwsAccessToken           - BWS machine-account access token.
@@ -22,6 +26,8 @@
  * @property {number}  circuitBreakerCooldown    - Cooldown period in seconds.
  * @property {boolean} gatewayAuthEnabled        - Whether gateway auth is enforced.
  * @property {string}  gatewayAuthSecret         - Shared secret for gateway auth (when gateway disabled).
+ * @property {number}  rateLimitWindowMs         - Rate limit window in milliseconds.
+ * @property {number}  rateLimitMaxRequests      - Max requests per window.
  */
 
 const VALID_LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
@@ -34,65 +40,113 @@ const VALID_LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
  * @returns {Readonly<AppConfig>} Frozen configuration object.
  * @throws {Error} Logs error and calls process.exit(1) on validation failure.
  */
-function loadConfig(env = process.env) {
+function loadConfig(envSource = process.env) {
   const errors = [];
+  const logs = [];
+
+  // Load .env file if it exists
+  const envPath = path.resolve(process.cwd(), '.env');
+  let dotEnvConfig = {};
+  if (fs.existsSync(envPath)) {
+    const result = dotenv.config({ path: envPath });
+    if (!result.error) {
+      dotEnvConfig = result.parsed;
+    }
+  }
+
+  /**
+   * Helper to get value with priority: .env > environment > default
+   */
+  const getValue = (key, defaultValue = undefined) => {
+    if (dotEnvConfig[key] !== undefined) {
+      logs.push(`Config: Loaded ${key} from .env file.`);
+      return dotEnvConfig[key];
+    }
+    if (envSource[key] !== undefined) {
+      logs.push(`Config: Loaded ${key} from environment variables.`);
+      return envSource[key];
+    }
+    if (defaultValue !== undefined) {
+      logs.push(`Config: Loaded ${key} from default value.`);
+      return defaultValue;
+    }
+    return undefined;
+  };
 
   // --- Required variables ---
-  const bwsAccessToken = env.BWS_ACCESS_TOKEN;
+  const bwsAccessToken = getValue('BWS_ACCESS_TOKEN');
   if (!bwsAccessToken) {
     errors.push('BWS_ACCESS_TOKEN is required but not set.');
   }
 
   // --- Optional variables with defaults and type coercion ---
-  const rawPort = env.PORT || '3000';
+  const rawPort = getValue('PORT', '3000');
   const port = Number(rawPort);
   if (Number.isNaN(port) || !Number.isInteger(port) || port < 1 || port > 65535) {
     errors.push(`PORT must be a valid integer between 1 and 65535. Got: "${rawPort}".`);
   }
 
-  const bwsStateFile = env.BWS_STATE_FILE || '/tmp/bws_state.json';
+  const bwsStateFile = getValue('BWS_STATE_FILE', '/tmp/bws_state.json');
 
-  const rawCacheTtl = env.CACHE_TTL || '60';
+  const rawCacheTtl = getValue('CACHE_TTL', '60');
   const cacheTtl = Number(rawCacheTtl);
   if (Number.isNaN(cacheTtl) || cacheTtl < 0) {
     errors.push(`CACHE_TTL must be a non-negative number. Got: "${rawCacheTtl}".`);
   }
 
-  const logLevel = (env.LOG_LEVEL || 'info').toLowerCase();
+  const rawLogLevel = getValue('LOG_LEVEL', 'info');
+  const logLevel = rawLogLevel.toLowerCase();
   if (!VALID_LOG_LEVELS.includes(logLevel)) {
-    errors.push(`LOG_LEVEL must be one of [${VALID_LOG_LEVELS.join(', ')}]. Got: "${env.LOG_LEVEL}".`);
+    errors.push(`LOG_LEVEL must be one of [${VALID_LOG_LEVELS.join(', ')}]. Got: "${rawLogLevel}".`);
   }
 
   // --- Bulk retrieval config ---
-  const rawBulkMaxIds = env.BULK_MAX_IDS || '50';
+  const rawBulkMaxIds = getValue('BULK_MAX_IDS', '50');
   const bulkMaxIds = Number(rawBulkMaxIds);
   if (Number.isNaN(bulkMaxIds) || !Number.isInteger(bulkMaxIds) || bulkMaxIds < 1) {
     errors.push(`BULK_MAX_IDS must be a positive integer. Got: "${rawBulkMaxIds}".`);
   }
 
   // --- Circuit breaker config ---
-  const rawCbThreshold = env.CIRCUIT_BREAKER_THRESHOLD || '5';
+  const rawCbThreshold = getValue('CIRCUIT_BREAKER_THRESHOLD', '5');
   const circuitBreakerThreshold = Number(rawCbThreshold);
   if (Number.isNaN(circuitBreakerThreshold) || circuitBreakerThreshold < 1) {
     errors.push(`CIRCUIT_BREAKER_THRESHOLD must be a positive integer. Got: "${rawCbThreshold}".`);
   }
 
-  const rawCbCooldown = env.CIRCUIT_BREAKER_COOLDOWN || '30';
+  const rawCbCooldown = getValue('CIRCUIT_BREAKER_COOLDOWN', '30');
   const circuitBreakerCooldown = Number(rawCbCooldown);
   if (Number.isNaN(circuitBreakerCooldown) || circuitBreakerCooldown < 0) {
     errors.push(`CIRCUIT_BREAKER_COOLDOWN must be a non-negative number. Got: "${rawCbCooldown}".`);
   }
 
   // --- Gateway auth config ---
-  const gatewayAuthEnabled = (env.GATEWAY_AUTH_ENABLED || 'false').toLowerCase() === 'true';
-  const gatewayAuthSecret = env.GATEWAY_AUTH_SECRET || '';
+  const gatewayAuthEnabled = (getValue('GATEWAY_AUTH_ENABLED', 'false')).toLowerCase() === 'true';
+  const gatewayAuthSecret = getValue('GATEWAY_AUTH_SECRET', '');
 
+  // --- Rate limiting config ---
+  const rawRateLimitWindowMs = getValue('RATE_LIMIT_WINDOW_MS', '900000'); // 15 minutes
+  const rateLimitWindowMs = Number(rawRateLimitWindowMs);
+  if (Number.isNaN(rateLimitWindowMs) || rateLimitWindowMs < 0) {
+    errors.push(`RATE_LIMIT_WINDOW_MS must be a non-negative number. Got: "${rawRateLimitWindowMs}".`);
+  }
+
+  const rawRateLimitMaxRequests = getValue('RATE_LIMIT_MAX_REQUESTS', '100');
+  const rateLimitMaxRequests = Number(rawRateLimitMaxRequests);
+  if (Number.isNaN(rateLimitMaxRequests) || !Number.isInteger(rateLimitMaxRequests) || rateLimitMaxRequests < 1) {
+    errors.push(`RATE_LIMIT_MAX_REQUESTS must be a positive integer. Got: "${rawRateLimitMaxRequests}".`);
+  }
+
+  // --- Fail-fast on validation errors ---
   // --- Fail-fast on validation errors ---
   if (errors.length > 0) {
     console.error('FATAL: Configuration validation failed:');
     errors.forEach((msg) => console.error(`  - ${msg}`));
     process.exit(1);
   }
+
+  // Log successful configuration loading
+  logs.forEach((log) => console.log(log));
 
   return Object.freeze({
     bwsAccessToken,
@@ -105,6 +159,8 @@ function loadConfig(env = process.env) {
     circuitBreakerCooldown,
     gatewayAuthEnabled,
     gatewayAuthSecret,
+    rateLimitWindowMs,
+    rateLimitMaxRequests,
   });
 }
 

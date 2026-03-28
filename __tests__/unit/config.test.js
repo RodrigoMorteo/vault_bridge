@@ -30,6 +30,8 @@ describe('config module', () => {
       circuitBreakerCooldown: 30,
       gatewayAuthEnabled: false,
       gatewayAuthSecret: '',
+      rateLimitWindowMs: 900000,
+      rateLimitMaxRequests: 100,
     });
     expect(Object.isFrozen(config)).toBe(true);
   });
@@ -46,6 +48,8 @@ describe('config module', () => {
       CIRCUIT_BREAKER_COOLDOWN: '60',
       GATEWAY_AUTH_ENABLED: 'true',
       GATEWAY_AUTH_SECRET: 'my-secret',
+      RATE_LIMIT_WINDOW_MS: '60000',
+      RATE_LIMIT_MAX_REQUESTS: '50',
     });
 
     expect(config).toEqual({
@@ -59,6 +63,8 @@ describe('config module', () => {
       circuitBreakerCooldown: 60,
       gatewayAuthEnabled: true,
       gatewayAuthSecret: 'my-secret',
+      rateLimitWindowMs: 60000,
+      rateLimitMaxRequests: 50,
     });
   });
 
@@ -173,5 +179,61 @@ describe('config module', () => {
       GATEWAY_AUTH_ENABLED: 'true',
     });
     expect(config.gatewayAuthEnabled).toBe(true);
+  });
+
+  test('prioritizes .env over environment variables', () => {
+    const fs = require('fs');
+    const dotenv = require('dotenv');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+    jest.spyOn(dotenv, 'config').mockReturnValue({
+      parsed: { BWS_ACCESS_TOKEN: 'env-file-token', PORT: '4000' }
+    });
+
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'process-env-token', PORT: '5000' });
+
+    expect(config.bwsAccessToken).toBe('env-file-token');
+    expect(config.port).toBe(4000);
+
+    fs.existsSync.mockRestore();
+    dotenv.config.mockRestore();
+  });
+
+  test('falls back to environment variables when not in .env', () => {
+    const fs = require('fs');
+    const dotenv = require('dotenv');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+    jest.spyOn(dotenv, 'config').mockReturnValue({
+      parsed: { BWS_ACCESS_TOKEN: 'env-file-token' }
+    });
+
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'process-env-token', PORT: '5000' });
+
+    expect(config.bwsAccessToken).toBe('env-file-token');
+    expect(config.port).toBe(5000);
+
+    fs.existsSync.mockRestore();
+    dotenv.config.mockRestore();
+  });
+
+  test('exits with code 1 when RATE_LIMIT_WINDOW_MS is invalid', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      RATE_LIMIT_WINDOW_MS: 'bad',
+    })).toThrow('process.exit called');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('RATE_LIMIT_WINDOW_MS must be a non-negative number')
+    );
+  });
+
+  test('exits with code 1 when RATE_LIMIT_MAX_REQUESTS is invalid', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      RATE_LIMIT_MAX_REQUESTS: '0',
+    })).toThrow('process.exit called');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('RATE_LIMIT_MAX_REQUESTS must be a positive integer')
+    );
   });
 });

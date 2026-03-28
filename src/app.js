@@ -6,6 +6,7 @@
  */
 
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const { createHealthRouter } = require('./routes/health');
 const { createVaultRouter } = require('./routes/vault');
 const { createMetricsRouter } = require('./routes/metrics');
@@ -25,6 +26,8 @@ const { createLogger } = require('./utils/logger');
  * @param {boolean}  [deps.gatewayAuthEnabled] - Whether gateway auth is enforced.
  * @param {string}   [deps.gatewayAuthSecret]  - Shared secret for local auth.
  * @param {number}   [deps.bulkMaxIds]        - Maximum IDs per bulk request.
+ * @param {number}   [deps.rateLimitWindowMs] - Rate limit window in ms.
+ * @param {number}   [deps.rateLimitMaxRequests] - Max requests per window.
  * @param {import('pino').Logger} [deps.logger] - Logger instance.
  * @param {string}   [deps.logLevel]          - Log level for auto-created logger.
  * @returns {express.Application}
@@ -38,6 +41,8 @@ function buildApp({
   gatewayAuthEnabled = false,
   gatewayAuthSecret = '',
   bulkMaxIds,
+  rateLimitWindowMs = 900000,
+  rateLimitMaxRequests = 100,
   logger,
   logLevel = 'info',
 }) {
@@ -106,6 +111,23 @@ function buildApp({
   // Routes
   app.use(healthRouter);
   app.use(metricsRouter);
+
+  // Rate limiting for vault routes (PBI-20)
+  app.use('/vault', rateLimit({
+    windowMs: rateLimitWindowMs,
+    max: rateLimitMaxRequests,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+    handler: (req, res, next, options) => {
+      req.log.warn({
+        windowMs: options.windowMs,
+        max: options.max,
+      }, 'Rate limit exceeded');
+      res.status(options.statusCode).send(options.message);
+    },
+  }));
+
   app.use(createVaultRouter({
     client,
     isReady,

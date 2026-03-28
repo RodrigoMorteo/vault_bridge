@@ -63,6 +63,8 @@ async function startServer() {
     gatewayAuthEnabled: config.gatewayAuthEnabled,
     gatewayAuthSecret: config.gatewayAuthSecret,
     bulkMaxIds: config.bulkMaxIds,
+    rateLimitWindowMs: config.rateLimitWindowMs,
+    rateLimitMaxRequests: config.rateLimitMaxRequests,
     logger,
   });
 
