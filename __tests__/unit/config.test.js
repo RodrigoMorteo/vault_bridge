@@ -3,21 +3,29 @@ const { loadConfig } = require('../../src/config');
 describe('config module', () => {
   let mockExit;
   let mockConsoleError;
+  let mockConsoleLog;
+  let silentLogger;
 
   beforeEach(() => {
     mockExit = jest.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
     });
     mockConsoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockConsoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
+    silentLogger = {
+      info: jest.fn(),
+      error: jest.fn()
+    };
   });
 
   afterEach(() => {
     mockExit.mockRestore();
     mockConsoleError.mockRestore();
+    mockConsoleLog.mockRestore();
   });
 
   test('returns frozen config with all defaults when only BWS_ACCESS_TOKEN is set', () => {
-    const config = loadConfig({ BWS_ACCESS_TOKEN: 'test-token-123' }, { skipDotEnv: true });
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'test-token-123' }, { skipDotEnv: true, logger: silentLogger });
 
     expect(config).toEqual({
       bwsAccessToken: 'test-token-123',
@@ -50,7 +58,7 @@ describe('config module', () => {
       GATEWAY_AUTH_SECRET: 'my-secret',
       RATE_LIMIT_WINDOW_MS: '60000',
       RATE_LIMIT_MAX_REQUESTS: '50',
-    }, { skipDotEnv: true });
+    }, { skipDotEnv: true, logger: silentLogger });
 
     expect(config).toEqual({
       bwsAccessToken: 'custom-token',
@@ -69,9 +77,9 @@ describe('config module', () => {
   });
 
   test('exits with code 1 when BWS_ACCESS_TOKEN is missing', () => {
-    expect(() => loadConfig({}, { skipDotEnv: true })).toThrow('process.exit called');
+    expect(() => loadConfig({}, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('Configuration validation failed')
     );
   });
@@ -80,9 +88,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       PORT: 'not-a-number',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('PORT must be a valid integer')
     );
   });
@@ -91,9 +99,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       CACHE_TTL: 'abc',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('CACHE_TTL must be a non-negative number')
     );
   });
@@ -102,9 +110,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       LOG_LEVEL: 'verbose',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('LOG_LEVEL must be one of')
     );
   });
@@ -113,9 +121,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       BULK_MAX_IDS: 'bad',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('BULK_MAX_IDS must be a positive integer')
     );
   });
@@ -124,9 +132,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       CIRCUIT_BREAKER_THRESHOLD: 'bad',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('CIRCUIT_BREAKER_THRESHOLD must be a positive integer')
     );
   });
@@ -135,9 +143,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       CIRCUIT_BREAKER_COOLDOWN: 'bad',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('CIRCUIT_BREAKER_COOLDOWN must be a non-negative number')
     );
   });
@@ -146,17 +154,17 @@ describe('config module', () => {
     expect(() => loadConfig({
       PORT: 'bad',
       CACHE_TTL: 'bad',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
     // Should report: missing token, bad port, bad cache ttl
-    expect(mockConsoleError).toHaveBeenCalledTimes(4); // 1 header + 3 errors
+    expect(silentLogger.error).toHaveBeenCalledTimes(4); // 1 header + 3 errors
   });
 
   test('normalizes LOG_LEVEL to lowercase', () => {
     const config = loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       LOG_LEVEL: 'WARN',
-    }, { skipDotEnv: true });
+    }, { skipDotEnv: true, logger: silentLogger });
     expect(config.logLevel).toBe('warn');
   });
 
@@ -164,12 +172,12 @@ describe('config module', () => {
     const config = loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       CACHE_TTL: '0',
-    }, { skipDotEnv: true });
+    }, { skipDotEnv: true, logger: silentLogger });
     expect(config.cacheTtl).toBe(0);
   });
 
   test('GATEWAY_AUTH_ENABLED defaults to false', () => {
-    const config = loadConfig({ BWS_ACCESS_TOKEN: 'token' }, { skipDotEnv: true });
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'token' }, { skipDotEnv: true, logger: silentLogger });
     expect(config.gatewayAuthEnabled).toBe(false);
   });
 
@@ -177,7 +185,7 @@ describe('config module', () => {
     const config = loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       GATEWAY_AUTH_ENABLED: 'true',
-    }, { skipDotEnv: true });
+    }, { skipDotEnv: true, logger: silentLogger });
     expect(config.gatewayAuthEnabled).toBe(true);
   });
 
@@ -189,7 +197,7 @@ describe('config module', () => {
       parsed: { BWS_ACCESS_TOKEN: 'env-file-token', PORT: '4000' }
     });
 
-    const config = loadConfig({ BWS_ACCESS_TOKEN: 'process-env-token', PORT: '5000' });
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'process-env-token', PORT: '5000' }, { logger: silentLogger });
 
     expect(config.bwsAccessToken).toBe('env-file-token');
     expect(config.port).toBe(4000);
@@ -206,7 +214,7 @@ describe('config module', () => {
       parsed: { BWS_ACCESS_TOKEN: 'env-file-token' }
     });
 
-    const config = loadConfig({ BWS_ACCESS_TOKEN: 'process-env-token', PORT: '5000' });
+    const config = loadConfig({ BWS_ACCESS_TOKEN: 'process-env-token', PORT: '5000' }, { logger: silentLogger });
 
     expect(config.bwsAccessToken).toBe('env-file-token');
     expect(config.port).toBe(5000);
@@ -219,9 +227,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       RATE_LIMIT_WINDOW_MS: 'bad',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('RATE_LIMIT_WINDOW_MS must be a non-negative number')
     );
   });
@@ -230,9 +238,9 @@ describe('config module', () => {
     expect(() => loadConfig({
       BWS_ACCESS_TOKEN: 'token',
       RATE_LIMIT_MAX_REQUESTS: '0',
-    }, { skipDotEnv: true })).toThrow('process.exit called');
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenCalledWith(
+    expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('RATE_LIMIT_MAX_REQUESTS must be a positive integer')
     );
   });

@@ -44,6 +44,7 @@ function loadConfig(envSource = process.env, options = {}) {
   const errors = [];
   const logs = [];
   const skipDotEnv = options.skipDotEnv || false;
+  const logger = options.logger;
 
   // Load .env file if it exists and not skipped
   const envPath = path.resolve(process.cwd(), '.env');
@@ -141,13 +142,22 @@ function loadConfig(envSource = process.env, options = {}) {
   // --- Fail-fast on validation errors ---
   // --- Fail-fast on validation errors ---
   if (errors.length > 0) {
-    console.error('FATAL: Configuration validation failed:');
-    errors.forEach((msg) => console.error(`  - ${msg}`));
+    if (logger && typeof logger.error === 'function') {
+      logger.error('FATAL: Configuration validation failed:');
+      errors.forEach((msg) => logger.error(`  - ${msg}`));
+    } else {
+      console.error('FATAL: Configuration validation failed:');
+      errors.forEach((msg) => console.error(`  - ${msg}`));
+    }
     process.exit(1);
   }
 
   // Log successful configuration loading
-  logs.forEach((log) => console.log(log));
+  if (logger && typeof logger.info === 'function') {
+    logs.forEach((msg) => logger.info(msg));
+  } else {
+    logs.forEach((msg) => console.log(msg));
+  }
 
   return Object.freeze({
     bwsAccessToken,

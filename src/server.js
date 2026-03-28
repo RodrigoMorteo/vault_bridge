@@ -30,8 +30,12 @@ let cache = null;
  * @returns {Promise<import('http').Server>} The listening HTTP server instance.
  */
 async function startServer() {
-  const config = loadConfig();
-  const logger = createLogger({ level: config.logLevel });
+  // Initial load to get log level
+  const initialConfig = loadConfig(process.env, { skipDotEnv: false });
+  const logger = createLogger({ level: initialConfig.logLevel });
+
+  // Reload with logger to get structured startup logs
+  const config = loadConfig(process.env, { skipDotEnv: false, logger });
 
   // Clean stale state file from prior unclean shutdown (PBI-11)
   cleanStaleStateFile(config.bwsStateFile, { logger });
