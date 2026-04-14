@@ -1,11 +1,14 @@
 /**
  * @module middleware/gatewayAuth
  * @description Express middleware for Zero-Trust gateway integration.
- *   When enabled (GATEWAY_AUTH_ENABLED=true), validates the Authorization
- *   header on /vault/* routes. When disabled, validates against a
- *   configurable fixed shared secret (GATEWAY_AUTH_SECRET).
+ *   Auth enforcement is driven solely by the presence of GATEWAY_AUTH_SECRET:
+ *   - If GATEWAY_AUTH_SECRET is set, every /vault/* request must supply a
+ *     matching "Authorization: Bearer <secret>" header.
+ *   - If GATEWAY_AUTH_SECRET is absent, the middleware is fully transparent
+ *     (no auth required — suitable for deployments that rely entirely on an
+ *     upstream APISix key_auth plugin or run in a trusted network).
  *
- *   Operational endpoints (/health, /metrics) are exempt from gateway auth.
+ *   Operational endpoints (/health, /metrics) are always exempt.
  *
  *   Implements ADR-003 (Zero-Trust via APISix Integration).
  */
@@ -15,49 +18,41 @@
 /**
  * Creates gateway auth middleware.
  *
+ * Auth is enforced when and only when `sharedSecret` is a non-empty string.
+ * The deprecated `enabled` flag has been removed to eliminate the ambiguous
+ * four-state truth table (enabled × sharedSecret) that caused pass-through
+ * failures when GATEWAY_AUTH_ENABLED was unset.
+ *
  * @param {Object}  options
- * @param {boolean} options.enabled          - Whether gateway auth is enforced.
- * @param {string}  [options.sharedSecret]   - Shared secret for local dev auth.
+ * @param {string}  [options.sharedSecret]   - Shared secret. When present,
+ *   every non-operational request must carry "Bearer <sharedSecret>".
  * @param {import('pino').Logger} [options.logger] - Logger instance.
  * @returns {Function} Express middleware function.
  */
-function createGatewayAuth({ enabled, sharedSecret = '', logger }) {
+function createGatewayAuth({ sharedSecret = '', logger }) {
   const log = logger || console;
 
   return (req, res, next) => {
-    // Skip auth for operational endpoints
+    // Operational endpoints are always exempt from auth checks.
     if (req.path === '/health' || req.path === '/metrics') {
       return next();
     }
 
-    // Skip auth when disabled (local development)
-    if (!enabled) {
-      // If a shared secret is configured, validate it
-      if (sharedSecret) {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || authHeader !== `Bearer ${sharedSecret}`) {
-          (req.log || log).warn({ path: req.path }, 'Gateway auth: invalid shared secret.');
-          return res.status(403).json({ error: 'Forbidden' });
-        }
-      }
+    // No secret configured — middleware is transparent (passthrough).
+    // This is the correct default when running behind a fully-trusted APISix
+    // gateway that handles auth upstream, or in local development without auth.
+    if (!sharedSecret) {
       return next();
     }
 
-    // Gateway auth enabled — validate Authorization header
+    // Secret configured — enforce Bearer token match (fail-closed).
     const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      (req.log || log).warn({ path: req.path }, 'Gateway auth: missing Authorization header.');
-      return res.status(403).json({ error: 'Forbidden' });
+    if (!authHeader || authHeader !== `Bearer ${sharedSecret}`) {
+      (req.log || log).warn({ path: req.path }, 'Gateway auth: missing or invalid Authorization header.');
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // When gateway is enabled, we trust the header from APISix
-    // (JWT verification would be added here in PBI-07b)
-    if (!authHeader.startsWith('Bearer ')) {
-      (req.log || log).warn({ path: req.path }, 'Gateway auth: invalid Authorization format.');
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    // Header present and formatted correctly — allow through
+    // Token matches — allow through.
     next();
   };
 }

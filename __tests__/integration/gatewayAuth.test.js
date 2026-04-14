@@ -14,73 +14,64 @@ describe('gatewayAuth middleware', () => {
     jest.clearAllMocks();
   });
 
-  // --- When disabled, no secret ---
-  test('allows all requests when disabled and no shared secret', () => {
-    const mw = createGatewayAuth({ enabled: false, logger: silentLogger });
+  // --- No secret configured (passthrough mode) ---
+  test('allows all requests when no sharedSecret is configured', () => {
+    const mw = createGatewayAuth({ logger: silentLogger });
     const req = { path: '/vault/secret/abc', headers: {} };
     mw(req, mockRes, mockNext);
     expect(mockNext).toHaveBeenCalled();
   });
 
-  // --- When disabled, with shared secret ---
-  test('allows request when disabled, shared secret matches', () => {
-    const mw = createGatewayAuth({ enabled: false, sharedSecret: 'my-key', logger: silentLogger });
+  test('allows requests with any header when no sharedSecret is configured', () => {
+    const mw = createGatewayAuth({ logger: silentLogger });
+    const req = { path: '/vault/secret/abc', headers: { authorization: 'Bearer anything' } };
+    mw(req, mockRes, mockNext);
+    expect(mockNext).toHaveBeenCalled();
+  });
+
+  // --- Secret configured (enforce mode) ---
+  test('allows request when sharedSecret matches Authorization header', () => {
+    const mw = createGatewayAuth({ sharedSecret: 'my-key', logger: silentLogger });
     const req = { path: '/vault/secret/abc', headers: { authorization: 'Bearer my-key' } };
     mw(req, mockRes, mockNext);
     expect(mockNext).toHaveBeenCalled();
   });
 
-  test('rejects request when disabled, shared secret does not match', () => {
-    const mw = createGatewayAuth({ enabled: false, sharedSecret: 'my-key', logger: silentLogger });
+  test('rejects with 401 when sharedSecret is set and token does not match', () => {
+    const mw = createGatewayAuth({ sharedSecret: 'my-key', logger: silentLogger });
     const req = { path: '/vault/secret/abc', headers: { authorization: 'Bearer wrong' }, log: silentLogger };
     mw(req, mockRes, mockNext);
     expect(mockNext).not.toHaveBeenCalled();
-    expect(mockRes.status).toHaveBeenCalledWith(403);
-    expect(mockRes.json).toHaveBeenCalledWith({ error: 'Forbidden' });
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    expect(mockRes.json).toHaveBeenCalledWith({ error: 'Unauthorized' });
   });
 
-  test('rejects request when disabled, shared secret configured but no header', () => {
-    const mw = createGatewayAuth({ enabled: false, sharedSecret: 'my-key', logger: silentLogger });
+  test('rejects with 401 when sharedSecret is set and Authorization header is absent', () => {
+    const mw = createGatewayAuth({ sharedSecret: 'my-key', logger: silentLogger });
     const req = { path: '/vault/secret/abc', headers: {}, log: silentLogger };
     mw(req, mockRes, mockNext);
     expect(mockNext).not.toHaveBeenCalled();
-    expect(mockRes.status).toHaveBeenCalledWith(403);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
   });
 
-  // --- When enabled ---
-  test('allows request when enabled and Bearer token present', () => {
-    const mw = createGatewayAuth({ enabled: true, logger: silentLogger });
-    const req = { path: '/vault/secret/abc', headers: { authorization: 'Bearer jwt-token-here' } };
-    mw(req, mockRes, mockNext);
-    expect(mockNext).toHaveBeenCalled();
-  });
-
-  test('rejects request when enabled and no Authorization header', () => {
-    const mw = createGatewayAuth({ enabled: true, logger: silentLogger });
-    const req = { path: '/vault/secret/abc', headers: {}, log: silentLogger };
+  test('rejects with 401 when sharedSecret is set and non-Bearer format is used', () => {
+    const mw = createGatewayAuth({ sharedSecret: 'my-key', logger: silentLogger });
+    const req = { path: '/vault/secret/abc', headers: { authorization: 'Basic my-key' }, log: silentLogger };
     mw(req, mockRes, mockNext);
     expect(mockNext).not.toHaveBeenCalled();
-    expect(mockRes.status).toHaveBeenCalledWith(403);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
   });
 
-  test('rejects request when enabled and non-Bearer format', () => {
-    const mw = createGatewayAuth({ enabled: true, logger: silentLogger });
-    const req = { path: '/vault/secret/abc', headers: { authorization: 'Basic abc' }, log: silentLogger };
-    mw(req, mockRes, mockNext);
-    expect(mockNext).not.toHaveBeenCalled();
-    expect(mockRes.status).toHaveBeenCalledWith(403);
-  });
-
-  // --- Exempt endpoints ---
-  test('allows /health without auth when enabled', () => {
-    const mw = createGatewayAuth({ enabled: true, logger: silentLogger });
+  // --- Exempt endpoints (always passthrough regardless of secret) ---
+  test('allows /health without auth even when sharedSecret is configured', () => {
+    const mw = createGatewayAuth({ sharedSecret: 'my-key', logger: silentLogger });
     const req = { path: '/health', headers: {} };
     mw(req, mockRes, mockNext);
     expect(mockNext).toHaveBeenCalled();
   });
 
-  test('allows /metrics without auth when enabled', () => {
-    const mw = createGatewayAuth({ enabled: true, logger: silentLogger });
+  test('allows /metrics without auth even when sharedSecret is configured', () => {
+    const mw = createGatewayAuth({ sharedSecret: 'my-key', logger: silentLogger });
     const req = { path: '/metrics', headers: {} };
     mw(req, mockRes, mockNext);
     expect(mockNext).toHaveBeenCalled();

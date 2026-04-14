@@ -78,8 +78,7 @@ The application logs the source of each variable at startup. The `BWS_ACCESS_TOK
 | `LOG_LEVEL` | Logging level (`trace`, `debug`, `info`, `warn`, `error`, `fatal`). | `info` | No |
 | `CIRCUIT_BREAKER_THRESHOLD` | Consecutive upstream failures to trip the circuit breaker. | `5` | No |
 | `CIRCUIT_BREAKER_COOLDOWN` | Seconds to wait before half-open probe. | `30` | No |
-| `GATEWAY_AUTH_ENABLED` | Enable gateway header validation (`true`/`false`). | `false` | No |
-| `GATEWAY_AUTH_SECRET` | Shared secret for local dev auth (when gateway disabled). | - | No |
+| `GATEWAY_AUTH_SECRET` | When set to a non-empty string, every `/vault/*` request must supply a matching `Authorization: Bearer <secret>` header. When absent or empty, the middleware is fully transparent (passthrough). Use this when the bridge is **not** behind an APISix gateway that handles auth upstream. | *(unset)* | No |
 | `BULK_MAX_IDS` | Maximum number of secret IDs per bulk retrieval request. | `50` | No |
 | `LOG_RETENTION_DAYS` | Log retention period in days (for compliance metadata). | `90` | No |
 | `RATE_LIMIT_WINDOW_MS` | Rate limit window in milliseconds. | `900000` (15m) | No |
@@ -177,7 +176,7 @@ Cached secrets are served without upstream calls. Uncached secrets are fetched i
 - In-memory TTL cache reduces upstream API calls; configurable via `CACHE_TTL`.
 - Circuit breaker protects against upstream failures: opens after `CIRCUIT_BREAKER_THRESHOLD` consecutive failures, serves stale cache when possible, probes after `CIRCUIT_BREAKER_COOLDOWN` seconds.
 - Rate limiting: enforced on all `/vault/*` routes using `express-rate-limit`. Configurable via `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX_REQUESTS`. Operational endpoints (`/health`, `/metrics`) are exempt.
-- Gateway auth (`GATEWAY_AUTH_ENABLED`): when enabled, validates `Authorization: Bearer <token>` on `/vault/*` routes. When disabled with `GATEWAY_AUTH_SECRET` set, validates a fixed shared secret.
+- Gateway auth: controlled solely by `GATEWAY_AUTH_SECRET`. When set, every `/vault/*` request must carry a matching `Authorization: Bearer <secret>` header — missing or wrong token returns `401 Unauthorized`. When unset, the middleware is fully transparent (suitable for deployments behind a trusted APISix gateway or in isolated dev environments). `/health` and `/metrics` are always exempt.
 - Proactive token lifecycle: on auth errors the bridge attempts re-authentication; if it fails, `/health` returns 503 triggering orchestrator restart.
 - State file (`BWS_STATE_FILE`) is securely zeroed and deleted on shutdown. Stale files from prior crashes are cleaned at startup.
 - Process exits on initial Bitwarden authentication failure to avoid stale state.

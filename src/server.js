@@ -64,7 +64,6 @@ async function startServer() {
     cache,
     circuitBreaker,
     attemptReauth,
-    gatewayAuthEnabled: config.gatewayAuthEnabled,
     gatewayAuthSecret: config.gatewayAuthSecret,
     bulkMaxIds: config.bulkMaxIds,
     rateLimitWindowMs: config.rateLimitWindowMs,
@@ -78,7 +77,7 @@ async function startServer() {
       cacheTtl: config.cacheTtl,
       circuitBreakerThreshold: config.circuitBreakerThreshold,
       circuitBreakerCooldown: config.circuitBreakerCooldown,
-      gatewayAuthEnabled: config.gatewayAuthEnabled,
+      gatewayAuthEnforced: !!config.gatewayAuthSecret,
     }, 'Vault Bridge listening internally.');
   });
 

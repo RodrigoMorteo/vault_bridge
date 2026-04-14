@@ -24,8 +24,9 @@ const dotenv = require('dotenv');
  * @property {string}  logLevel                  - Logging level.
  * @property {number}  circuitBreakerThreshold   - Consecutive failures to trip circuit.
  * @property {number}  circuitBreakerCooldown    - Cooldown period in seconds.
- * @property {boolean} gatewayAuthEnabled        - Whether gateway auth is enforced.
- * @property {string}  gatewayAuthSecret         - Shared secret for gateway auth (when gateway disabled).
+ * @property {string}  gatewayAuthSecret         - Shared secret for gateway auth. When non-empty,
+ *                                                 every /vault/* request must supply a matching
+ *                                                 Bearer token. Empty string = auth disabled.
  * @property {number}  rateLimitWindowMs         - Rate limit window in milliseconds.
  * @property {number}  rateLimitMaxRequests      - Max requests per window.
  */
@@ -123,7 +124,10 @@ function loadConfig(envSource = process.env, options = {}) {
   }
 
   // --- Gateway auth config ---
-  const gatewayAuthEnabled = (getValue('GATEWAY_AUTH_ENABLED', 'false')).toLowerCase() === 'true';
+  // Auth is enabled when and only when GATEWAY_AUTH_SECRET is a non-empty string.
+  // GATEWAY_AUTH_ENABLED has been removed — a single env var is the source of truth,
+  // eliminating the ambiguous (enabled=false, secret=set) and (enabled=true, secret='')
+  // states that caused unexpected 401s when the flag was unset.
   const gatewayAuthSecret = getValue('GATEWAY_AUTH_SECRET', '');
 
   // --- Rate limiting config ---
@@ -168,7 +172,6 @@ function loadConfig(envSource = process.env, options = {}) {
     bulkMaxIds,
     circuitBreakerThreshold,
     circuitBreakerCooldown,
-    gatewayAuthEnabled,
     gatewayAuthSecret,
     rateLimitWindowMs,
     rateLimitMaxRequests,

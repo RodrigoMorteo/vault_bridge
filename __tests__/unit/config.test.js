@@ -36,7 +36,6 @@ describe('config module', () => {
       bulkMaxIds: 50,
       circuitBreakerThreshold: 5,
       circuitBreakerCooldown: 30,
-      gatewayAuthEnabled: false,
       gatewayAuthSecret: '',
       rateLimitWindowMs: 900000,
       rateLimitMaxRequests: 100,
@@ -54,7 +53,6 @@ describe('config module', () => {
       BULK_MAX_IDS: '100',
       CIRCUIT_BREAKER_THRESHOLD: '3',
       CIRCUIT_BREAKER_COOLDOWN: '60',
-      GATEWAY_AUTH_ENABLED: 'true',
       GATEWAY_AUTH_SECRET: 'my-secret',
       RATE_LIMIT_WINDOW_MS: '60000',
       RATE_LIMIT_MAX_REQUESTS: '50',
@@ -69,7 +67,6 @@ describe('config module', () => {
       bulkMaxIds: 100,
       circuitBreakerThreshold: 3,
       circuitBreakerCooldown: 60,
-      gatewayAuthEnabled: true,
       gatewayAuthSecret: 'my-secret',
       rateLimitWindowMs: 60000,
       rateLimitMaxRequests: 50,
@@ -176,17 +173,17 @@ describe('config module', () => {
     expect(config.cacheTtl).toBe(0);
   });
 
-  test('GATEWAY_AUTH_ENABLED defaults to false', () => {
+  test('GATEWAY_AUTH_SECRET defaults to empty string when not set', () => {
     const config = loadConfig({ BWS_ACCESS_TOKEN: 'token' }, { skipDotEnv: true, logger: silentLogger });
-    expect(config.gatewayAuthEnabled).toBe(false);
+    expect(config.gatewayAuthSecret).toBe('');
   });
 
-  test('GATEWAY_AUTH_ENABLED parses "true" correctly', () => {
+  test('GATEWAY_AUTH_SECRET is captured when set', () => {
     const config = loadConfig({
       BWS_ACCESS_TOKEN: 'token',
-      GATEWAY_AUTH_ENABLED: 'true',
+      GATEWAY_AUTH_SECRET: 'super-secret',
     }, { skipDotEnv: true, logger: silentLogger });
-    expect(config.gatewayAuthEnabled).toBe(true);
+    expect(config.gatewayAuthSecret).toBe('super-secret');
   });
 
   test('prioritizes .env over environment variables', () => {

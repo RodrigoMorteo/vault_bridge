@@ -23,8 +23,8 @@ const { createLogger } = require('./utils/logger');
  * @param {Object}   [deps.cache]             - TTL cache instance.
  * @param {Object}   [deps.circuitBreaker]    - Circuit breaker instance.
  * @param {Function} [deps.attemptReauth]     - Re-auth function for token lifecycle.
- * @param {boolean}  [deps.gatewayAuthEnabled] - Whether gateway auth is enforced.
- * @param {string}   [deps.gatewayAuthSecret]  - Shared secret for local auth.
+ * @param {string}   [deps.gatewayAuthSecret]  - Shared secret for gateway auth. Non-empty
+ *                                               enables enforcement; empty = passthrough.
  * @param {number}   [deps.bulkMaxIds]        - Maximum IDs per bulk request.
  * @param {number}   [deps.rateLimitWindowMs] - Rate limit window in ms.
  * @param {number}   [deps.rateLimitMaxRequests] - Max requests per window.
@@ -38,7 +38,6 @@ function buildApp({
   cache,
   circuitBreaker,
   attemptReauth,
-  gatewayAuthEnabled = false,
   gatewayAuthSecret = '',
   bulkMaxIds,
   rateLimitWindowMs = 900000,
@@ -101,9 +100,9 @@ function buildApp({
     next();
   });
 
-  // Gateway auth middleware (applied before vault routes, exempt for /health, /metrics)
+  // Gateway auth middleware (applied before vault routes, exempt for /health, /metrics).
+  // Auth is enforced solely by GATEWAY_AUTH_SECRET presence — no separate flag needed.
   app.use(createGatewayAuth({
-    enabled: gatewayAuthEnabled,
     sharedSecret: gatewayAuthSecret,
     logger: log,
   }));
