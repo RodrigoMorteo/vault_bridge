@@ -54,7 +54,7 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
     if (cache) {
       const cached = cache.get(secretId);
       if (cached !== undefined) {
-        log.debug({ secretId, cacheHit: true }, 'Serving secret from cache.');
+        log.debug({ cacheHit: true }, 'Serving secret from cache.');
         if (instruments) instruments.cacheHitsTotal.inc();
         return res.status(200).json(cached);
       }
@@ -63,7 +63,7 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
 
     // Circuit breaker check
     if (circuitBreaker && !circuitBreaker.allowRequest()) {
-      log.warn({ secretId }, 'Circuit breaker is open. Checking stale cache...');
+      log.warn('Circuit breaker is open. Checking stale cache...');
       if (cache) {
         const stale = cache.get(secretId);
         if (stale !== undefined) {
@@ -89,7 +89,7 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
       return res.status(200).json(result);
     } catch (error) {
       const classification = classifyError(error);
-      log.error({ err: error, secretId }, 'Error retrieving secret.');
+      log.error({ err: error }, 'Error retrieving secret.');
       if (circuitBreaker) circuitBreaker.recordFailure();
       if (classification.isAuthError && attemptReauth) {
         attemptReauth().catch(() => {});
@@ -161,7 +161,7 @@ function createVaultRouter({ client, isReady, cache, circuitBreaker, attemptReau
         results.push(result);
       } catch (error) {
         const classification = classifyError(error);
-        log.error({ err: error, secretId }, 'Error retrieving secret in bulk request.');
+        log.error({ err: error }, 'Error retrieving secret in bulk request.');
         if (circuitBreaker) circuitBreaker.recordFailure();
         if (classification.isAuthError && attemptReauth) {
           attemptReauth().catch(() => {});

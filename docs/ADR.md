@@ -88,6 +88,10 @@ We will use a **Local In-Memory Cache** with a configurable Time-To-Live (TTL), 
 
 **Justification:** Redis introduces unnecessary infrastructure complexity for this use case. A local cache is faster (no network hop) and sufficient because secret consistency (eventual consistency) is acceptable for the 60s window. If a secret rotates, waiting 60s is acceptable.
 
+#### Revision — 2026-07-27: Bound plaintext retention
+
+The local cache is limited to `CACHE_MAX_ENTRIES` (default 1000), evicts the oldest live entry at capacity, and sweeps expired entries every minute. Shutdown stops the sweep and clears the cache. TTL alone is insufficient because an entry that is never read again would otherwise remain retained in the `Map` after expiry.
+
 ### 6. Consequences
 **Positive:**
 - Immediate response times (< 1ms) for hot secrets.
@@ -95,7 +99,7 @@ We will use a **Local In-Memory Cache** with a configurable Time-To-Live (TTL), 
 
 **Negative:**
 - Potential for stale data during the TTL window.
-- Memory usage on the container will increase slightly.
+- Plaintext memory retention is bounded by the configured entry limit and expiry sweep, but must still be included in the container memory budget.
 
 ### 7. Compliance and Governance
 - **Automated:** Load tests (`k6`) must verify that repeated requests do not trigger upstream calls (mocked).
@@ -142,6 +146,10 @@ We will use **Gateway Offloading via APISix**. The bridge will sit behind an int
 - `GATEWAY_AUTH_SECRET=<value>` → every `/vault/*` request must carry `Authorization: Bearer <value>`. Missing or wrong token returns `401 Unauthorized` (RFC 7235 semantically correct — prior implementation incorrectly returned `403`).
 
 **Justification:** Single env var as source of truth (KISS). Eliminates the ambiguous dual-control surface. Fail-closed when a secret is configured (Zero Trust).
+
+#### Revision — 2026-07-27: Harden local deployment and comparison
+
+The Compose deployment publishes the bridge only on `127.0.0.1` by default; remote consumers must use an authenticated reverse proxy or an explicitly designed private network. When the optional bridge bearer secret is configured, its value is compared with `crypto.timingSafeEqual` after validating the Bearer format. Authentication failures are logged without a request path, because a vault path embeds a secret UUID.
 
 ### 6. Consequences
 **Positive:**
@@ -292,6 +300,10 @@ We will implement a **custom circuit breaker** as a simple state machine (closed
 
 **Justification:** Our circuit breaker requirements are straightforward: count consecutive failures, open on threshold, probe after cooldown. Libraries like `opossum` provide timeout wrapping, event emitters, and fallback functions that we don't need (YAGNI). A ~120 LOC custom implementation is easier to audit, test, and understand than configuring a library's abstraction layer. The circuit breaker integrates tightly with our cache for stale-serve, which is simpler with direct state access than through a library's callback API.
 
+#### Revision — 2026-07-27: Single half-open probe
+
+When the cooldown expires, the breaker permits exactly one request to probe the upstream. Concurrent requests are rejected (or may use stale cache) until that probe records success or failure. This prevents a recovery-time request stampede.
+
 ### 6. Consequences
 **Positive:**
 - Zero additional dependencies.
@@ -322,11 +334,13 @@ We will implement a **custom circuit breaker** as a simple state machine (closed
 **007. Rate Limiting Strategy: express-rate-limit**
 
 ### 2. Status and Date
-**Status:** Proposed
+**Status:** Implemented (2026-07-27)
 **Date:** 2026-03-27
 
 ### 3. Context
 The bridge is susceptible to brute-force attacks and resource exhaustion if a client makes an excessive number of requests. While the upstream Bitwarden API has its own rate limits, the bridge should protect itself and the upstream service by enforcing its own limits at the edge.
+
+When the bridge is deployed behind a reverse proxy, it can receive an `X-Forwarded-For` header. Express must only use that header when the immediate socket peer is a known proxy; otherwise a directly connected client could forge its source address. The default `express-rate-limit` validation rejects this header when Express does not trust proxies, which previously produced an HTTP middleware error in such deployments.
 
 ### 4. Evaluation Criteria and Options
 - **Simplicity:** Easy to integrate with Express.
@@ -340,24 +354,75 @@ The bridge is susceptible to brute-force attacks and resource exhaustion if a cl
 3. **Custom Implementation:** Simple but requires manual header management and state tracking.
 
 ### 5. Decision
-We will use **express-rate-limit**.
+We will use **express-rate-limit**. The bridge will ignore forwarded-address headers by default and rate-limit using the socket peer address. Operators that deploy behind a reverse proxy must configure `TRUSTED_PROXY_CIDRS` with only the addresses or CIDRs of proxies that connect directly to the bridge. Boolean `true` and numeric hop-count proxy settings are deliberately not supported.
 
-**Justification:** It is the most widely used rate-limiting middleware for Express, providing a perfect balance of simplicity and features. It natively supports the required HTTP headers and allows for easy configuration via environment variables.
+**Justification:** It is the most widely used rate-limiting middleware for Express, providing a practical balance of simplicity and features. It natively supports the required HTTP headers and allows for easy configuration via environment variables. Explicit trusted-proxy configuration retains per-client limits behind a proxy without accepting spoofed client addresses.
 
 ### 6. Consequences
 **Positive:**
 - Protection against brute-force and DoS.
 - Standardized rate-limit headers for clients.
+- Safe direct access even when an untrusted client sends `X-Forwarded-For`.
+- Correct per-client rate limiting when the immediate proxy network is explicitly configured.
 - Minimal implementation effort.
 
 **Negative:**
 - Adds a new production dependency.
 - In-memory storage is per-instance (acceptable for our current architecture).
+- Operators must maintain `TRUSTED_PROXY_CIDRS` when proxy addressing changes; leaving it unset intentionally applies a shared limit at the proxy/socket-peer level.
+- Application-memory limits are per replica. Production-wide abuse protection must be enforced at APISix or another shared rate-limit store; the bridge limiter remains a per-instance defense-in-depth control.
 
 ### 7. Compliance and Governance
-- **Automated:** Integration tests must verify 429 responses when limits are exceeded.
+- **Automated:** Integration tests must verify 429 responses when limits are exceeded and that an untrusted `X-Forwarded-For` header does not produce a validation error.
 - **Monitoring:** Rate limit hits should ideally be instrumented (future PBI).
 
 ### 8. Notes and Consultation
 - Author: Roo (AI Assistant)
 - Refs: PBI-20
+
+---
+
+## 008. Operational Resource and Recovery Bounds
+
+### 1. Title and Identifier
+**008. Operational Resource and Recovery Bounds**
+
+### 2. Status and Date
+**Status:** Implemented
+**Date:** 2026-07-27
+
+### 3. Context
+An internal secrets bridge must remain predictable during malformed traffic, stalled connections, upstream authentication failures, and restart conditions. Unbounded plaintext caching, indefinitely open connections, and unlimited restart loops can turn an application failure into host resource pressure. Conversely, a retry loop without a cap can conceal a persistent credential or network fault.
+
+### 4. Evaluation Criteria and Options
+- **Containment:** Bound memory, processes, logs, connection lifetime, and restart behavior.
+- **Recoverability:** Retry transient re-authentication failures without requiring a request to arrive.
+- **Operability:** Surface persistent faults for an operator or orchestrator rather than looping forever.
+- **Simplicity:** Use Node and Compose primitives; avoid additional runtime dependencies.
+
+**Options:**
+1. Rely on Docker/Node defaults.
+2. Add external resilience libraries and a sidecar supervisor.
+3. Apply explicit application and deployment bounds using native facilities.
+
+### 5. Decision
+Use explicit native bounds: Node HTTP header/request/keep-alive timeouts, bounded exponential re-authentication retries, idempotent graceful shutdown with a forced-exit deadline, Compose memory/PID/log limits, an init process, health checks, and a bounded restart policy.
+
+### 6. Consequences
+**Positive:**
+- Slow or stalled clients cannot retain HTTP sockets indefinitely.
+- A transient auth outage can recover automatically; a persistent outage becomes visible after the configured retry budget.
+- The Compose deployment has materially less ability to exhaust host memory, process, or disk-log resources.
+
+**Negative:**
+- Long-running requests beyond `REQUEST_TIMEOUT_MS` are terminated.
+- Operators must tune bounds to their environment and investigate exhausted restart/retry budgets.
+- Compose health status provides observability but does not itself restart an unhealthy container.
+
+### 7. Compliance and Governance
+- **Configuration:** `CACHE_MAX_ENTRIES`, `REAUTH_RETRY_MAX_ATTEMPTS`, `REAUTH_RETRY_BASE_MS`, `REQUEST_TIMEOUT_MS`, `HEADERS_TIMEOUT_MS`, and `KEEP_ALIVE_TIMEOUT_MS` are validated at startup.
+- **Automated:** Unit tests cover cache capacity/expiry, single circuit-breaker probes, and bounded re-authentication recovery.
+- **Manual:** Production deployments must retain memory limits and enforce a shared gateway-level rate limit when running multiple replicas.
+
+### 8. Notes and Consultation
+- Implementation: `src/services/cache.js`, `src/services/bitwardenClient.js`, `src/services/circuitBreaker.js`, `src/server.js`, `docker-compose.yml`.

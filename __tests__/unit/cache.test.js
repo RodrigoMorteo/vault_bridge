@@ -107,4 +107,31 @@ describe('cache module', () => {
     expect(cache.get('a')).toBe('new');
     expect(cache.size()).toBe(1);
   });
+
+  test('evicts the oldest entry when maxEntries is reached', () => {
+    const cache = createCache({ maxEntries: 2, cleanupIntervalMs: 0 });
+    cache.set('a', 'first');
+    cache.set('b', 'second');
+    cache.set('c', 'third');
+
+    expect(cache.get('a')).toBeUndefined();
+    expect(cache.get('b')).toBe('second');
+    expect(cache.get('c')).toBe('third');
+  });
+
+  test('sweep() removes expired entries without a read', () => {
+    const cache = createCache({ defaultTtlSeconds: 0, cleanupIntervalMs: 0 });
+    cache.set('expired', 'secret');
+
+    expect(cache.sweep()).toBe(1);
+    expect(cache.size()).toBe(0);
+  });
+
+  test('stop() clears plaintext entries', () => {
+    const cache = createCache({ cleanupIntervalMs: 0 });
+    cache.set('secret-id', { value: 'secret' });
+    cache.stop();
+
+    expect(cache.size()).toBe(0);
+  });
 });

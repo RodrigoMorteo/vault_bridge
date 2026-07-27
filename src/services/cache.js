@@ -15,14 +15,46 @@
  *
  * @param {Object}  [options]
  * @param {number}  [options.defaultTtlSeconds=60] - Default TTL in seconds.
- * @returns {Object} Cache interface: get, set, has, delete, clear, stats, size.
+ * @param {number}  [options.maxEntries=1000] - Maximum entries retained in memory.
+ * @param {number}  [options.cleanupIntervalMs=60000] - Expiry sweep interval; 0 disables it.
+ * @returns {Object} Cache interface: get, set, has, delete, clear, sweep, stop, stats, size.
  */
-function createCache({ defaultTtlSeconds = 60 } = {}) {
+function createCache({
+  defaultTtlSeconds = 60,
+  maxEntries = 1000,
+  cleanupIntervalMs = 60000,
+} = {}) {
   /** @type {Map<string, { value: any, expiresAt: number }>} */
   const store = new Map();
 
   let hits = 0;
   let misses = 0;
+
+  /**
+   * Removes entries whose TTL has elapsed. Map insertion order lets us evict
+   * the oldest live entry when the configured bound is reached.
+   *
+   * @returns {number} Count of removed entries.
+   */
+  function sweep() {
+    const now = Date.now();
+    let removed = 0;
+    for (const [key, entry] of store) {
+      if (now >= entry.expiresAt) {
+        store.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  const cleanupTimer = cleanupIntervalMs > 0
+    ? setInterval(sweep, cleanupIntervalMs)
+    : null;
+  // A maintenance timer must never keep the process alive during shutdown.
+  if (cleanupTimer && typeof cleanupTimer.unref === 'function') {
+    cleanupTimer.unref();
+  }
 
   /**
    * Checks if an entry exists and is not expired. Evicts if expired.
@@ -67,6 +99,16 @@ function createCache({ defaultTtlSeconds = 60 } = {}) {
    */
   function set(key, value, ttlSeconds) {
     const ttl = ttlSeconds !== undefined ? ttlSeconds : defaultTtlSeconds;
+
+    sweep();
+    if (!store.has(key)) {
+      while (store.size >= maxEntries) {
+        const oldestKey = store.keys().next().value;
+        if (oldestKey === undefined) break;
+        store.delete(oldestKey);
+      }
+    }
+
     store.set(key, {
       value,
       expiresAt: Date.now() + ttl * 1000,
@@ -91,6 +133,14 @@ function createCache({ defaultTtlSeconds = 60 } = {}) {
     misses = 0;
   }
 
+  /** Stops background expiry maintenance and clears plaintext entries. */
+  function stop() {
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer);
+    }
+    clear();
+  }
+
   /**
    * Returns cache statistics.
    * @returns {{ size: number, hits: number, misses: number }}
@@ -107,7 +157,7 @@ function createCache({ defaultTtlSeconds = 60 } = {}) {
     return store.size;
   }
 
-  return { get, set, has, delete: del, clear, stats, size };
+  return { get, set, has, delete: del, clear, sweep, stop, stats, size };
 }
 
 module.exports = { createCache };

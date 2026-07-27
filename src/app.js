@@ -15,6 +15,26 @@ const { createGatewayAuth } = require('./middleware/gatewayAuth');
 const { createLogger } = require('./utils/logger');
 
 /**
+ * Returns a bounded-cardinality, non-sensitive route label for logs and
+ * metrics. Never use a raw vault path because it embeds the secret UUID.
+ *
+ * @param {express.Request} req
+ * @returns {string}
+ */
+function getRequestRoute(req) {
+  if (req.route && typeof req.route.path === 'string') {
+    return req.route.path;
+  }
+  if (/^\/vault\/secret\/[^/]+$/.test(req.path)) {
+    return '/vault/secret/:id';
+  }
+  if (req.path === '/vault/secrets' || req.path === '/health' || req.path === '/metrics') {
+    return req.path;
+  }
+  return '/unmatched';
+}
+
+/**
  * Builds and returns the configured Express application.
  *
  * @param {Object}   deps
@@ -28,6 +48,8 @@ const { createLogger } = require('./utils/logger');
  * @param {number}   [deps.bulkMaxIds]        - Maximum IDs per bulk request.
  * @param {number}   [deps.rateLimitWindowMs] - Rate limit window in ms.
  * @param {number}   [deps.rateLimitMaxRequests] - Max requests per window.
+ * @param {string[]} [deps.trustedProxyCidrs] - Explicit reverse-proxy IPs/CIDRs whose
+ *                                              X-Forwarded-For headers may be trusted.
  * @param {import('pino').Logger} [deps.logger] - Logger instance.
  * @param {string}   [deps.logLevel]          - Log level for auto-created logger.
  * @returns {express.Application}
@@ -42,11 +64,17 @@ function buildApp({
   bulkMaxIds,
   rateLimitWindowMs = 900000,
   rateLimitMaxRequests = 100,
+  trustedProxyCidrs = [],
   logger,
   logLevel = 'info',
 }) {
   const app = express();
   const log = logger || createLogger({ level: logLevel });
+
+  // Never use `true` or a hop count here. Both can allow a directly connected
+  // client to forge X-Forwarded-For when there are shorter network paths.
+  // With no configured proxy, Express ignores forwarded headers entirely.
+  app.set('trust proxy', trustedProxyCidrs.length > 0 ? trustedProxyCidrs : false);
 
   // Create metrics
   const { router: metricsRouter, instruments } = createMetricsRouter();
@@ -66,12 +94,12 @@ function buildApp({
     const startTime = Date.now();
     res.on('finish', () => {
       const durationSeconds = (Date.now() - startTime) / 1000;
-      const route = req.route ? req.route.path : req.path;
+      const route = getRequestRoute(req);
 
       // Log request completion
       req.log.info({
         method: req.method,
-        path: req.originalUrl,
+        route,
         statusCode: res.statusCode,
         responseTimeMs: Date.now() - startTime,
       }, 'Request completed');
@@ -117,6 +145,12 @@ function buildApp({
     max: rateLimitMaxRequests,
     standardHeaders: true,
     legacyHeaders: false,
+    // The library treats an X-Forwarded-For header with trust proxy disabled
+    // as a validation error. We deliberately support that safe default: in
+    // this mode request.ip is the socket peer and the untrusted header is
+    // ignored. When trustedProxyCidrs is configured Express validates the
+    // socket peer before using the forwarded address.
+    validate: { xForwardedForHeader: false },
     message: { error: 'Too many requests, please try again later.' },
     handler: (req, res, next, options) => {
       req.log.warn({
@@ -138,6 +172,19 @@ function buildApp({
     logger: log,
     onUpstreamSuccess: () => healthRouter.recordUpstreamSuccess && healthRouter.recordUpstreamSuccess(),
   }));
+
+  // Convert errors forwarded by middleware (including third-party validation
+  // errors) into a logged, opaque response. This keeps request failures from
+  // escaping the HTTP stack or exposing implementation details to clients.
+  app.use((err, req, res, _next) => {
+    const requestLog = req.log || log;
+    requestLog.error({ err }, 'Unhandled HTTP middleware error');
+    if (res.headersSent) {
+      _next(err);
+      return;
+    }
+    res.status(500).json({ error: 'Internal server error.' });
+  });
 
   return app;
 }

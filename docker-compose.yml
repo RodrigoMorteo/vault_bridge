@@ -1,24 +1,50 @@
-version: '3.8'
-
 services:
   bws-vault-bridge:
     build: .
     container_name: bws-vault-bridge
     image: bws-vault-bridge:latest
-    restart: unless-stopped
+    # Avoid an unbounded restart loop on a persistent configuration or SDK
+    # failure. Monitoring should alert when the retry budget is exhausted.
+    restart: on-failure:5
     ports:
-      - "${PORT:-3000}:3000"
+      # Direct host exposure is intentionally loopback-only. Put APISix or
+      # another authenticated reverse proxy in front for remote consumers.
+      - "127.0.0.1:${PORT:-3000}:3000"
     environment:
-      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN:-your_access_token_here}
+      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN}
       - BWS_STATE_FILE=/tmp/bws_state.json
+      - GATEWAY_AUTH_SECRET=${GATEWAY_AUTH_SECRET}
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-}
+      - CACHE_MAX_ENTRIES=${CACHE_MAX_ENTRIES:-1000}
+      - REAUTH_RETRY_MAX_ATTEMPTS=${REAUTH_RETRY_MAX_ATTEMPTS:-5}
+      - REAUTH_RETRY_BASE_MS=${REAUTH_RETRY_BASE_MS:-1000}
+      - REQUEST_TIMEOUT_MS=${REQUEST_TIMEOUT_MS:-30000}
+      - HEADERS_TIMEOUT_MS=${HEADERS_TIMEOUT_MS:-10000}
+      - KEEP_ALIVE_TIMEOUT_MS=${KEEP_ALIVE_TIMEOUT_MS:-5000}
     #volumes:
       # Optional: Persist the SDK state file to avoid re-auth on restart
     #  - bws_state:/tmp
     # Security: Run as non-root user (defined in Dockerfile)
     user: "1000:1000"
+    init: true
     read_only: true
     tmpfs:
       - /tmp
+    mem_limit: 256m
+    mem_reservation: 128m
+    pids_limit: 100
+    stop_grace_period: 35s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   bws_state:

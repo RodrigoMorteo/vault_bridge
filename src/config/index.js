@@ -12,6 +12,7 @@
 'use strict';
 
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -21,6 +22,7 @@ const dotenv = require('dotenv');
  * @property {number}  port                      - HTTP port for the service.
  * @property {string}  bwsStateFile              - Path to Bitwarden SDK state file.
  * @property {number}  cacheTtl                  - Cache time-to-live in seconds.
+ * @property {number}  cacheMaxEntries           - Maximum in-memory secret cache entries.
  * @property {string}  logLevel                  - Logging level.
  * @property {number}  circuitBreakerThreshold   - Consecutive failures to trip circuit.
  * @property {number}  circuitBreakerCooldown    - Cooldown period in seconds.
@@ -29,9 +31,45 @@ const dotenv = require('dotenv');
  *                                                 Bearer token. Empty string = auth disabled.
  * @property {number}  rateLimitWindowMs         - Rate limit window in milliseconds.
  * @property {number}  rateLimitMaxRequests      - Max requests per window.
+ * @property {string[]} trustedProxyCidrs         - Explicit proxy IPs/CIDRs whose forwarded
+ *                                                  headers may be trusted.
+ * @property {number}  reauthRetryMaxAttempts     - Background re-authentication retry limit.
+ * @property {number}  reauthRetryBaseMs          - Initial re-authentication retry delay.
+ * @property {number}  requestTimeoutMs           - Maximum duration of an HTTP request.
+ * @property {number}  headersTimeoutMs           - Maximum duration to receive request headers.
+ * @property {number}  keepAliveTimeoutMs         - Idle HTTP keep-alive duration.
  */
 
 const VALID_LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+const TRUSTED_PROXY_NAMES = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+/**
+ * Validates an IP address or CIDR accepted by Express/proxy-addr. Do not
+ * accept hop counts or `true`: either can let a directly connected client
+ * spoof X-Forwarded-For on a topology with multiple ingress paths.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isValidTrustedProxy(value) {
+  if (TRUSTED_PROXY_NAMES.has(value)) {
+    return true;
+  }
+
+  const [address, prefix, ...rest] = value.split('/');
+  const ipVersion = net.isIP(address);
+  if (!ipVersion || rest.length > 0) {
+    return false;
+  }
+
+  if (prefix === undefined) {
+    return true;
+  }
+
+  return /^\d+$/.test(prefix)
+    && Number(prefix) >= 0
+    && Number(prefix) <= (ipVersion === 4 ? 32 : 128);
+}
 
 /**
  * Loads, validates, and returns the application configuration from
@@ -97,6 +135,12 @@ function loadConfig(envSource = process.env, options = {}) {
     errors.push(`CACHE_TTL must be a non-negative number. Got: "${rawCacheTtl}".`);
   }
 
+  const rawCacheMaxEntries = getValue('CACHE_MAX_ENTRIES', '1000');
+  const cacheMaxEntries = Number(rawCacheMaxEntries);
+  if (Number.isNaN(cacheMaxEntries) || !Number.isInteger(cacheMaxEntries) || cacheMaxEntries < 1) {
+    errors.push(`CACHE_MAX_ENTRIES must be a positive integer. Got: "${rawCacheMaxEntries}".`);
+  }
+
   const rawLogLevel = getValue('LOG_LEVEL', 'info');
   const logLevel = rawLogLevel.toLowerCase();
   if (!VALID_LOG_LEVELS.includes(logLevel)) {
@@ -143,6 +187,56 @@ function loadConfig(envSource = process.env, options = {}) {
     errors.push(`RATE_LIMIT_MAX_REQUESTS must be a positive integer. Got: "${rawRateLimitMaxRequests}".`);
   }
 
+  // Trust forwarded headers only from explicitly declared reverse proxies.
+  // Leaving this unset is safe for direct container access: X-Forwarded-For
+  // is ignored and rate limiting uses the socket peer address instead.
+  const rawTrustedProxyCidrs = getValue('TRUSTED_PROXY_CIDRS', '');
+  const trustedProxyCidrs = rawTrustedProxyCidrs
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const invalidTrustedProxy = trustedProxyCidrs.find((value) => !isValidTrustedProxy(value));
+  if (invalidTrustedProxy) {
+    errors.push(
+      `TRUSTED_PROXY_CIDRS must be a comma-separated list of IP addresses, CIDRs, or `
+      + `the names loopback, linklocal, uniquelocal. Got invalid value: "${invalidTrustedProxy}".`,
+    );
+  }
+
+  // --- Re-authentication resilience config ---
+  const rawReauthRetryMaxAttempts = getValue('REAUTH_RETRY_MAX_ATTEMPTS', '5');
+  const reauthRetryMaxAttempts = Number(rawReauthRetryMaxAttempts);
+  if (Number.isNaN(reauthRetryMaxAttempts) || !Number.isInteger(reauthRetryMaxAttempts) || reauthRetryMaxAttempts < 0) {
+    errors.push(`REAUTH_RETRY_MAX_ATTEMPTS must be a non-negative integer. Got: "${rawReauthRetryMaxAttempts}".`);
+  }
+
+  const rawReauthRetryBaseMs = getValue('REAUTH_RETRY_BASE_MS', '1000');
+  const reauthRetryBaseMs = Number(rawReauthRetryBaseMs);
+  if (Number.isNaN(reauthRetryBaseMs) || !Number.isInteger(reauthRetryBaseMs) || reauthRetryBaseMs < 1) {
+    errors.push(`REAUTH_RETRY_BASE_MS must be a positive integer. Got: "${rawReauthRetryBaseMs}".`);
+  }
+
+  // --- HTTP server resource bounds ---
+  const rawRequestTimeoutMs = getValue('REQUEST_TIMEOUT_MS', '30000');
+  const requestTimeoutMs = Number(rawRequestTimeoutMs);
+  if (Number.isNaN(requestTimeoutMs) || !Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1) {
+    errors.push(`REQUEST_TIMEOUT_MS must be a positive integer. Got: "${rawRequestTimeoutMs}".`);
+  }
+
+  const rawHeadersTimeoutMs = getValue('HEADERS_TIMEOUT_MS', '10000');
+  const headersTimeoutMs = Number(rawHeadersTimeoutMs);
+  if (Number.isNaN(headersTimeoutMs) || !Number.isInteger(headersTimeoutMs) || headersTimeoutMs < 1) {
+    errors.push(`HEADERS_TIMEOUT_MS must be a positive integer. Got: "${rawHeadersTimeoutMs}".`);
+  } else if (!Number.isNaN(requestTimeoutMs) && headersTimeoutMs > requestTimeoutMs) {
+    errors.push(`HEADERS_TIMEOUT_MS must not exceed REQUEST_TIMEOUT_MS. Got: "${rawHeadersTimeoutMs}" > "${rawRequestTimeoutMs}".`);
+  }
+
+  const rawKeepAliveTimeoutMs = getValue('KEEP_ALIVE_TIMEOUT_MS', '5000');
+  const keepAliveTimeoutMs = Number(rawKeepAliveTimeoutMs);
+  if (Number.isNaN(keepAliveTimeoutMs) || !Number.isInteger(keepAliveTimeoutMs) || keepAliveTimeoutMs < 1) {
+    errors.push(`KEEP_ALIVE_TIMEOUT_MS must be a positive integer. Got: "${rawKeepAliveTimeoutMs}".`);
+  }
+
   // --- Fail-fast on validation errors ---
   // --- Fail-fast on validation errors ---
   if (errors.length > 0) {
@@ -168,6 +262,7 @@ function loadConfig(envSource = process.env, options = {}) {
     port,
     bwsStateFile,
     cacheTtl,
+    cacheMaxEntries,
     logLevel,
     bulkMaxIds,
     circuitBreakerThreshold,
@@ -175,7 +270,13 @@ function loadConfig(envSource = process.env, options = {}) {
     gatewayAuthSecret,
     rateLimitWindowMs,
     rateLimitMaxRequests,
+    trustedProxyCidrs,
+    reauthRetryMaxAttempts,
+    reauthRetryBaseMs,
+    requestTimeoutMs,
+    headersTimeoutMs,
+    keepAliveTimeoutMs,
   });
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, isValidTrustedProxy };

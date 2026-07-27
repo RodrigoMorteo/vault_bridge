@@ -10,7 +10,12 @@ const { buildApp } = require('./src/app');
 
 // Start the server when run directly
 if (require.main === module) {
-  startServer();
+  startServer().catch((err) => {
+    // Startup failures must be handled explicitly; otherwise modern Node
+    // promotes the rejected promise to an uncaught exception.
+    console.error('Fatal error while starting Vault Bridge.', err);
+    process.exitCode = 1;
+  });
 }
 
 // Re-export buildApp for test compatibility

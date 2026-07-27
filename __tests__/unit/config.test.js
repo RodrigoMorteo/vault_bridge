@@ -32,6 +32,7 @@ describe('config module', () => {
       port: 3000,
       bwsStateFile: '/tmp/bws_state.json',
       cacheTtl: 60,
+      cacheMaxEntries: 1000,
       logLevel: 'info',
       bulkMaxIds: 50,
       circuitBreakerThreshold: 5,
@@ -39,6 +40,12 @@ describe('config module', () => {
       gatewayAuthSecret: '',
       rateLimitWindowMs: 900000,
       rateLimitMaxRequests: 100,
+      trustedProxyCidrs: [],
+      reauthRetryMaxAttempts: 5,
+      reauthRetryBaseMs: 1000,
+      requestTimeoutMs: 30000,
+      headersTimeoutMs: 10000,
+      keepAliveTimeoutMs: 5000,
     });
     expect(Object.isFrozen(config)).toBe(true);
   });
@@ -49,6 +56,7 @@ describe('config module', () => {
       PORT: '8080',
       BWS_STATE_FILE: '/var/run/bws_state.json',
       CACHE_TTL: '120',
+      CACHE_MAX_ENTRIES: '200',
       LOG_LEVEL: 'debug',
       BULK_MAX_IDS: '100',
       CIRCUIT_BREAKER_THRESHOLD: '3',
@@ -56,6 +64,12 @@ describe('config module', () => {
       GATEWAY_AUTH_SECRET: 'my-secret',
       RATE_LIMIT_WINDOW_MS: '60000',
       RATE_LIMIT_MAX_REQUESTS: '50',
+      TRUSTED_PROXY_CIDRS: '10.42.0.0/16, 2001:db8::/32',
+      REAUTH_RETRY_MAX_ATTEMPTS: '3',
+      REAUTH_RETRY_BASE_MS: '2000',
+      REQUEST_TIMEOUT_MS: '45000',
+      HEADERS_TIMEOUT_MS: '15000',
+      KEEP_ALIVE_TIMEOUT_MS: '6000',
     }, { skipDotEnv: true, logger: silentLogger });
 
     expect(config).toEqual({
@@ -63,6 +77,7 @@ describe('config module', () => {
       port: 8080,
       bwsStateFile: '/var/run/bws_state.json',
       cacheTtl: 120,
+      cacheMaxEntries: 200,
       logLevel: 'debug',
       bulkMaxIds: 100,
       circuitBreakerThreshold: 3,
@@ -70,6 +85,12 @@ describe('config module', () => {
       gatewayAuthSecret: 'my-secret',
       rateLimitWindowMs: 60000,
       rateLimitMaxRequests: 50,
+      trustedProxyCidrs: ['10.42.0.0/16', '2001:db8::/32'],
+      reauthRetryMaxAttempts: 3,
+      reauthRetryBaseMs: 2000,
+      requestTimeoutMs: 45000,
+      headersTimeoutMs: 15000,
+      keepAliveTimeoutMs: 6000,
     });
   });
 
@@ -239,6 +260,38 @@ describe('config module', () => {
     expect(mockExit).toHaveBeenCalledWith(1);
     expect(silentLogger.error).toHaveBeenCalledWith(
       expect.stringContaining('RATE_LIMIT_MAX_REQUESTS must be a positive integer')
+    );
+  });
+
+  test('exits with code 1 for unsafe TRUSTED_PROXY_CIDRS values', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      TRUSTED_PROXY_CIDRS: 'true',
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(silentLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining('TRUSTED_PROXY_CIDRS must be a comma-separated list'),
+    );
+  });
+
+  test('exits with code 1 when CACHE_MAX_ENTRIES is invalid', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      CACHE_MAX_ENTRIES: '0',
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
+    expect(silentLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining('CACHE_MAX_ENTRIES must be a positive integer'),
+    );
+  });
+
+  test('exits with code 1 when HEADERS_TIMEOUT_MS exceeds REQUEST_TIMEOUT_MS', () => {
+    expect(() => loadConfig({
+      BWS_ACCESS_TOKEN: 'token',
+      REQUEST_TIMEOUT_MS: '1000',
+      HEADERS_TIMEOUT_MS: '2000',
+    }, { skipDotEnv: true, logger: silentLogger })).toThrow('process.exit called');
+    expect(silentLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining('HEADERS_TIMEOUT_MS must not exceed REQUEST_TIMEOUT_MS'),
     );
   });
 });

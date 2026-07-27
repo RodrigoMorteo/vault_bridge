@@ -32,6 +32,7 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
   let state = STATES.CLOSED;
   let consecutiveFailures = 0;
   let openedAt = null;
+  let probeInFlight = false;
 
   /**
    * Returns the current circuit state.
@@ -52,7 +53,14 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
    */
   function allowRequest() {
     const currentState = getState();
-    return currentState === STATES.CLOSED || currentState === STATES.HALF_OPEN;
+    if (currentState === STATES.CLOSED) {
+      return true;
+    }
+    if (currentState === STATES.HALF_OPEN && !probeInFlight) {
+      probeInFlight = true;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -65,6 +73,7 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
     consecutiveFailures = 0;
     state = STATES.CLOSED;
     openedAt = null;
+    probeInFlight = false;
   }
 
   /**
@@ -77,6 +86,7 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
       // Probe failed — reopen
       state = STATES.OPEN;
       openedAt = Date.now();
+      probeInFlight = false;
       log.warn('Circuit breaker re-opened after failed probe.');
       return;
     }
@@ -84,6 +94,7 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
     if (consecutiveFailures >= failureThreshold && state === STATES.CLOSED) {
       state = STATES.OPEN;
       openedAt = Date.now();
+      probeInFlight = false;
       log.warn({ consecutiveFailures, failureThreshold }, 'Circuit breaker opened.');
     }
   }
@@ -96,6 +107,7 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
     return {
       state: getState(),
       consecutiveFailures,
+      probeInFlight,
     };
   }
 
@@ -106,6 +118,7 @@ function createCircuitBreaker({ failureThreshold = 5, cooldownMs = 30000, logger
     state = STATES.CLOSED;
     consecutiveFailures = 0;
     openedAt = null;
+    probeInFlight = false;
   }
 
   return {

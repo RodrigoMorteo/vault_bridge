@@ -23,6 +23,11 @@ let isReauthenticating = false;
 /** @type {{ accessToken: string, stateFile: string, logger: any }|null} */
 let authConfig = null;
 
+/** @type {NodeJS.Timeout|null} */
+let reauthTimer = null;
+
+const MAX_REAUTH_RETRY_DELAY_MS = 30000;
+
 /**
  * Authenticates with Bitwarden Secrets Manager using a machine-account
  * access token. On success, stores the client reference internally.
@@ -34,16 +39,28 @@ let authConfig = null;
  * @returns {Promise<BitwardenClient>} The authenticated client instance.
  * @throws {Error} If authentication fails.
  */
-async function initBitwarden({ accessToken, stateFile, logger }) {
+async function initBitwarden({
+  accessToken,
+  stateFile,
+  logger,
+  reauthRetryMaxAttempts = 5,
+  reauthRetryBaseMs = 1000,
+}) {
   const log = logger || console;
 
   if (!accessToken) {
-    log.error('FATAL: BWS_ACCESS_TOKEN environment variable is missing.');
-    process.exit(1);
+    throw new Error('BWS_ACCESS_TOKEN environment variable is missing.');
   }
 
   // Store config for re-authentication
-  authConfig = { accessToken, stateFile, logger: log };
+  authConfig = {
+    accessToken,
+    stateFile,
+    logger: log,
+    reauthRetryMaxAttempts,
+    reauthRetryBaseMs,
+    reauthRetryAttempts: 0,
+  };
 
   try {
     const bwClient = new BitwardenClient(
@@ -62,7 +79,37 @@ async function initBitwarden({ accessToken, stateFile, logger }) {
     return bwClient;
   } catch (err) {
     log.error({ err }, 'Failed to authenticate with Bitwarden.');
-    process.exit(1);
+    isClientReady = false;
+    throw err;
+  }
+}
+
+/** Schedules the next bounded exponential re-authentication retry. */
+function scheduleReauthRetry() {
+  if (!authConfig || reauthTimer) return;
+
+  if (authConfig.reauthRetryAttempts >= authConfig.reauthRetryMaxAttempts) {
+    authConfig.logger.error({
+      attempts: authConfig.reauthRetryAttempts,
+    }, 'Re-authentication retry limit reached. Awaiting operator action or process restart.');
+    return;
+  }
+
+  const delayMs = Math.min(
+    authConfig.reauthRetryBaseMs * (2 ** authConfig.reauthRetryAttempts),
+    MAX_REAUTH_RETRY_DELAY_MS,
+  );
+  authConfig.reauthRetryAttempts++;
+  authConfig.logger.warn({
+    attempt: authConfig.reauthRetryAttempts,
+    delayMs,
+  }, 'Scheduling Bitwarden re-authentication retry.');
+  reauthTimer = setTimeout(() => {
+    reauthTimer = null;
+    attemptReauth();
+  }, delayMs);
+  if (typeof reauthTimer.unref === 'function') {
+    reauthTimer.unref();
   }
 }
 
@@ -96,6 +143,7 @@ async function attemptReauth() {
     await bwClient.auth().loginAccessToken(authConfig.accessToken, authConfig.stateFile);
     client = bwClient;
     isClientReady = true;
+    authConfig.reauthRetryAttempts = 0;
     isReauthenticating = false;
     log.info('Re-authentication successful.');
     return true;
@@ -103,7 +151,16 @@ async function attemptReauth() {
     log.error({ err }, 'Re-authentication failed. Service degraded.');
     isClientReady = false;
     isReauthenticating = false;
+    scheduleReauthRetry();
     return false;
+  }
+}
+
+/** Cancels scheduled background retry work during service shutdown. */
+function stopReauthRetries() {
+  if (reauthTimer) {
+    clearTimeout(reauthTimer);
+    reauthTimer = null;
   }
 }
 
@@ -136,6 +193,7 @@ function getIsReauthenticating() {
  * @private
  */
 function _resetForTesting() {
+  stopReauthRetries();
   client = null;
   isClientReady = false;
   isReauthenticating = false;
@@ -145,6 +203,7 @@ function _resetForTesting() {
 module.exports = {
   initBitwarden,
   attemptReauth,
+  stopReauthRetries,
   getClient,
   getIsClientReady,
   getIsReauthenticating,

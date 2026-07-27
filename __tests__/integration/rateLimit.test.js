@@ -60,4 +60,12 @@ describe('Rate Limiting Integration', () => {
     const metricsRes = await request(app).get('/metrics');
     expect(metricsRes.statusCode).toBe(200);
   });
+
+  test('handles untrusted X-Forwarded-For without a validation error', async () => {
+    const res = await request(app)
+      .get('/vault/secret/550e8400-e29b-41d4-a716-446655440000')
+      .set('X-Forwarded-For', '203.0.113.10');
+
+    expect(res.statusCode).toBe(200);
+  });
 });

@@ -32,10 +32,18 @@ env:
   PORT: "3000"
   BWS_STATE_FILE: "/tmp/bws_state.json"
   CACHE_TTL: "60"
+  CACHE_MAX_ENTRIES: "1000"
   LOG_LEVEL: "info"
   CIRCUIT_BREAKER_THRESHOLD: "5"
   CIRCUIT_BREAKER_COOLDOWN: "30"
-  GATEWAY_AUTH_ENABLED: "true"
+  # Set only to the addresses/CIDRs of reverse proxies that connect directly
+  # to this service; leave empty for direct container access.
+  TRUSTED_PROXY_CIDRS: ""
+  REAUTH_RETRY_MAX_ATTEMPTS: "5"
+  REAUTH_RETRY_BASE_MS: "1000"
+  REQUEST_TIMEOUT_MS: "30000"
+  HEADERS_TIMEOUT_MS: "10000"
+  KEEP_ALIVE_TIMEOUT_MS: "5000"
 
 # Secret reference for BWS_ACCESS_TOKEN (must exist in the namespace)
 existingSecret:

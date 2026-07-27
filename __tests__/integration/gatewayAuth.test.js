@@ -1,4 +1,4 @@
-const { createGatewayAuth } = require('../../src/middleware/gatewayAuth');
+const { createGatewayAuth, secureTokenEquals } = require('../../src/middleware/gatewayAuth');
 
 describe('gatewayAuth middleware', () => {
   let mockRes;
@@ -60,6 +60,11 @@ describe('gatewayAuth middleware', () => {
     mw(req, mockRes, mockNext);
     expect(mockNext).not.toHaveBeenCalled();
     expect(mockRes.status).toHaveBeenCalledWith(401);
+  });
+
+  test('compares bearer tokens safely and rejects a matching-length mismatch', () => {
+    expect(secureTokenEquals('my-key', 'my-key')).toBe(true);
+    expect(secureTokenEquals('my-key', 'my-kez')).toBe(false);
   });
 
   // --- Exempt endpoints (always passthrough regardless of secret) ---

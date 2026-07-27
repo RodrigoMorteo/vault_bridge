@@ -75,6 +75,7 @@ The application logs the source of each variable at startup. The `BWS_ACCESS_TOK
 | `PORT` | HTTP port for the service (1–65535). | `3000` | No |
 | `BWS_STATE_FILE` | Path to store SDK state. | `/tmp/bws_state.json` | No |
 | `CACHE_TTL` | Cache time-to-live in seconds. | `60` | No |
+| `CACHE_MAX_ENTRIES` | Maximum plaintext secrets retained in the in-memory cache; oldest entries are evicted at capacity. | `1000` | No |
 | `LOG_LEVEL` | Logging level (`trace`, `debug`, `info`, `warn`, `error`, `fatal`). | `info` | No |
 | `CIRCUIT_BREAKER_THRESHOLD` | Consecutive upstream failures to trip the circuit breaker. | `5` | No |
 | `CIRCUIT_BREAKER_COOLDOWN` | Seconds to wait before half-open probe. | `30` | No |
@@ -83,6 +84,12 @@ The application logs the source of each variable at startup. The `BWS_ACCESS_TOK
 | `LOG_RETENTION_DAYS` | Log retention period in days (for compliance metadata). | `90` | No |
 | `RATE_LIMIT_WINDOW_MS` | Rate limit window in milliseconds. | `900000` (15m) | No |
 | `RATE_LIMIT_MAX_REQUESTS` | Max requests per window for `/vault/*` routes. | `100` | No |
+| `TRUSTED_PROXY_CIDRS` | Comma-separated IPs/CIDRs for reverse proxies allowed to supply `X-Forwarded-For`. Leave unset for direct access. | *(unset)* | No |
+| `REAUTH_RETRY_MAX_ATTEMPTS` | Number of background re-authentication retries after an auth failure. | `5` | No |
+| `REAUTH_RETRY_BASE_MS` | Initial retry delay in milliseconds; retries use bounded exponential backoff. | `1000` | No |
+| `REQUEST_TIMEOUT_MS` | Maximum lifetime of an HTTP request. | `30000` | No |
+| `HEADERS_TIMEOUT_MS` | Maximum time allowed to receive HTTP request headers. Must not exceed `REQUEST_TIMEOUT_MS`. | `10000` | No |
+| `KEEP_ALIVE_TIMEOUT_MS` | Idle keep-alive connection timeout. | `5000` | No |
 
 All configuration is centralized in `src/config/index.js`. The application validates all variables at startup and exits with code 1 on invalid or missing required values.
 
@@ -174,10 +181,15 @@ Cached secrets are served without upstream calls. Uncached secrets are fetched i
 - All logs are structured JSON (Pino) with automatic redaction of sensitive fields (`key`, `value`, `token`, `authorization`, `BWS_ACCESS_TOKEN`).
 - Each request is assigned a unique `requestId` (or forwarded from `X-Request-Id` header).
 - In-memory TTL cache reduces upstream API calls; configurable via `CACHE_TTL`.
+- Cache entries are bounded by `CACHE_MAX_ENTRIES`, expired entries are swept every minute, and the cache is cleared during shutdown so plaintext values do not accumulate indefinitely.
 - Circuit breaker protects against upstream failures: opens after `CIRCUIT_BREAKER_THRESHOLD` consecutive failures, serves stale cache when possible, probes after `CIRCUIT_BREAKER_COOLDOWN` seconds.
 - Rate limiting: enforced on all `/vault/*` routes using `express-rate-limit`. Configurable via `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX_REQUESTS`. Operational endpoints (`/health`, `/metrics`) are exempt.
+- Proxy handling: forwarded client addresses are ignored by default. If the bridge is behind a reverse proxy, set `TRUSTED_PROXY_CIDRS` to only that proxy's address or network (for example, `10.42.0.0/16`); do not use `true` or a hop count. This preserves correct per-client rate limiting without accepting spoofed headers.
+- Proxy/rate-limit diagnostics: an `X-Forwarded-For` header must not terminate the process. If `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` appears after deployment, verify that the running image includes this fix and that the deployment configuration matches it. Investigate any VM shutdown separately through container OOM status and guest/Proxmox logs; an HTTP middleware validation failure alone is not evidence of a kernel or hypervisor failure.
 - Gateway auth: controlled solely by `GATEWAY_AUTH_SECRET`. When set, every `/vault/*` request must carry a matching `Authorization: Bearer <secret>` header — missing or wrong token returns `401 Unauthorized`. When unset, the middleware is fully transparent (suitable for deployments behind a trusted APISix gateway or in isolated dev environments). `/health` and `/metrics` are always exempt.
 - Proactive token lifecycle: on auth errors the bridge attempts re-authentication; if it fails, `/health` returns 503 triggering orchestrator restart.
+- Re-authentication retries use bounded exponential backoff; after the retry budget is exhausted, the service remains unavailable for operator intervention or orchestrator restart rather than retrying indefinitely.
+- HTTP header, request, and keep-alive timeouts protect the process from slow or stalled clients. In Docker Compose, the bridge is loopback-only by default, has memory/PID/log limits, and uses a bounded restart policy.
 - State file (`BWS_STATE_FILE`) is securely zeroed and deleted on shutdown. Stale files from prior crashes are cleaned at startup.
 - Process exits on initial Bitwarden authentication failure to avoid stale state.
 - Graceful shutdown clears the cache, securely deletes the state file, and closes connections on `SIGTERM`/`SIGINT`.

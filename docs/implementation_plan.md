@@ -280,9 +280,9 @@ New dependencies to be introduced during implementation:
 | PBI | Title | Status | Estimate | Session(s) | Notes |
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | PBI-04 | Input Validation (UUID v4) | ✅ Done | 2 SP | S1 | UUID v4 middleware with 10 unit tests. |
-| PBI-05 | In-Memory TTL Cache | ✅ Done | 3 SP | S1 | Native Map cache with TTL, stats. 13 unit tests. ADR-002 implemented. |
+| PBI-05 | In-Memory TTL Cache | ✅ Done | 3 SP | S1, S5 | Native Map cache with TTL, bounded capacity, expiry sweep, and shutdown cleanup. 16 unit tests. ADR-002 implemented. |
 | PBI-06 | Granular HTTP Error Mapping | ✅ Done | 2 SP | S1 | Error classifier with regex patterns. 17 unit tests. |
-| PBI-08 | Proactive Token Lifecycle Management | ✅ Done | 5 SP | S1 | Re-auth with mutex, fire-and-forget trigger. Integration tested. |
+| PBI-08 | Proactive Token Lifecycle Management | ✅ Done | 5 SP | S1, S5 | Re-auth mutex plus bounded exponential retry after failure. Lifecycle unit tests cover recovery. |
 
 **Phase 2 Total:** 12 SP
 
@@ -294,9 +294,9 @@ New dependencies to be introduced during implementation:
 
 | PBI | Title | Status | Estimate | Session(s) | Notes |
 | :--- | :--- | :---: | :---: | :--- | :--- |
-| PBI-07 | Zero-Trust Gateway Integration (APISix) | ✅ Done | 5 SP | S1, S3 | Gateway auth middleware. S3: removed GATEWAY_AUTH_ENABLED flag — auth driven by GATEWAY_AUTH_SECRET presence only. 8 tests. |
-| PBI-09 | Circuit Breaker (Upstream API) | ✅ Done | 5 SP | S1 | State machine (closed→open→half-open), stale-serve, config vars. 10 tests. |
-| PBI-10 | Prometheus Metrics Endpoint | ✅ Done | 3 SP | S1 | prom-client, /metrics endpoint, request/cache/CB instrumentation. 2 integration tests. |
+| PBI-07 | Zero-Trust Gateway Integration (APISix) | ✅ Done | 5 SP | S1, S3, S5 | Gateway auth middleware; auth derives from `GATEWAY_AUTH_SECRET`, with constant-time Bearer comparison. |
+| PBI-09 | Circuit Breaker (Upstream API) | ✅ Done | 5 SP | S1, S5 | State machine (closed→open→half-open), stale-serve, and exactly one half-open probe. 11 tests. |
+| PBI-10 | Prometheus Metrics Endpoint | ✅ Done | 3 SP | S1, S5 | prom-client request/cache/CB instrumentation with bounded, secret-free route labels. |
 | PBI-11 | Secure State File Lifecycle | ✅ Done | 2 SP | S1 | Zero+delete on shutdown, stale cleanup at startup. 5 unit tests. |
 
 **Phase 3 Total:** 15 SP
@@ -311,7 +311,7 @@ New dependencies to be introduced during implementation:
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | PBI-12 | Enhanced Health Check (Deep Probes) | ✅ Done | 3 SP | S1 | Shallow + deep probes, degraded status. 6 integration tests. |
 | PBI-13 | CI/CD Pipeline (GitHub Actions) | ✅ Done | 5 SP | S1 | ci.yml (test+build+publish) + nightly-audit.yml (Trivy+npm audit). |
-| PBI-14 | Kubernetes Manifests + NetworkPolicies | ✅ Done | 5 SP | S1 | Helm chart: Deployment, Service, NetworkPolicy, non-root, RO filesystem. |
+| PBI-14 | Kubernetes Manifests + NetworkPolicies | ✅ Done | 5 SP | S1, S5 | Helm chart: Deployment, Service, NetworkPolicy, non-root, RO filesystem, resource bounds, and runtime timeout/retry configuration. |
 
 **Phase 4 Total:** 13 SP
 
@@ -328,7 +328,7 @@ New dependencies to be introduced during implementation:
 | PBI-17 | API Documentation (OpenAPI 3.0) | ✅ Done | 2 SP | S1 | docs/openapi.yaml — full spec for all endpoints. |
 | PBI-18 | Log Retention & Archival Policy | ✅ Done | 3 SP | S1 | src/utils/logRetention.js — policy config + metadata. 8 unit tests. |
 | PBI-19 | Configurable Bulk Retrieval Limit | ✅ Done | 1 SP | S1 | BULK_MAX_IDS env var, config validation, DI through app→vault route. |
-| PBI-20 | Implement Rate Limiting for Vault Routes | 🔄 In Progress | 3 SP | S2 | Implementing express-rate-limit middleware. |
+| PBI-20 | Implement Rate Limiting for Vault Routes | ✅ Done | 3 SP | S2, S4, S5 | `express-rate-limit`, standard headers, safe `TRUSTED_PROXY_CIDRS`; production-wide limiting remains an APISix/shared-store responsibility. |
 
 **Phase 5 Total:** 16 SP
 
@@ -577,6 +577,56 @@ Detailed implementation notes for Phase 5 PBIs (PBI-15 through PBI-18) will be e
 **Context for Next Session:**
 - [Any important context the next AI assistant instance needs to know]
 ```
+
+### Session 5 — 2026-07-27
+
+**Duration:** ~1.5 hours
+**PBIs Worked On:** PBI-05, PBI-07, PBI-08, PBI-09, PBI-10, PBI-14, PBI-20 (operational hardening)
+**Status Changes:**
+- Existing completed PBIs revised with production hardening; no new feature scope added.
+**Decisions Made:**
+- **ADR-008 (New):** Apply explicit cache, connection, retry, restart, and container-resource bounds using Node and Compose primitives.
+- **ADR-002/003/006/007 (Revised):** Bound plaintext cache retention; use constant-time bearer comparison and loopback-only Compose ingress; permit one half-open probe; require gateway/shared-store limits for multi-replica production protection.
+**Issues Encountered:**
+- The prior cache retained expired plaintext entries until each key was read, the half-open circuit breaker admitted concurrent probes, failed re-authentication had no background recovery path, and raw vault UUIDs could enter logs/metrics.
+**Documents Updated:**
+- `README.md` — new cache, retry, and HTTP timeout variables plus operational behavior.
+- `docs/ADR.md` — revisions to ADRs 002/003/006/007 and new ADR-008.
+- `docs/implementation_plan.md` — tracker notes and this session record.
+**Tests Added/Modified:**
+- `__tests__/unit/cache.test.js` — capacity, expiry sweep, and shutdown clearing.
+- `__tests__/unit/circuitBreaker.test.js` — single half-open probe.
+- `__tests__/unit/bitwardenClient.test.js` — startup rejection and retry recovery.
+- `__tests__/integration/gatewayAuth.test.js` — constant-time token comparison helper.
+- `__tests__/integration/metrics.test.js` — secret UUID excluded from metric labels.
+**Next Steps:**
+- Configure production APISix (or a shared store) with a global rate limit and alert on exhausted Compose restart or re-authentication retry budgets.
+**Context for Next Session:**
+- Compose binds this service to loopback by default. Remote consumers need an authenticated reverse proxy or a deliberately private network path.
+
+### Session 4 — 2026-07-27
+
+**Duration:** ~0.5 hours
+**PBIs Worked On:** PBI-20 (production hardening)
+**Status Changes:**
+- PBI-20: 🔄 In Progress → ✅ Done
+**Decisions Made:**
+- **ADR-007 (Implemented):** Keep `express-rate-limit`, but treat forwarded client addresses as untrusted by default. `TRUSTED_PROXY_CIDRS` is the sole proxy-trust setting and accepts explicit IPs/CIDRs only; global trust and hop counts are prohibited.
+**Issues Encountered:**
+- `express-rate-limit` raises `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` when a request contains `X-Forwarded-For` while Express does not trust proxies. The middleware forwards that error to Express; it is an HTTP request failure, not evidence that Node crashed or that the VM kernel/hypervisor failed.
+**Documents Updated:**
+- `README.md` — configuration, proxy behavior, and diagnostic guidance.
+- `docs/ADR.md` — ADR-007 marked implemented with trusted-proxy decision and consequences.
+- `docs/product_backlog.md` — PBI-20 acceptance criteria extended for forwarded-address handling.
+- `docs/supplementary_specification.md` — zero-trust and auditability requirements clarified.
+- `docs/implementation_plan.md` — PBI-20 completed and this session recorded.
+**Tests Added/Modified:**
+- `__tests__/integration/rateLimit.test.js` — verifies untrusted `X-Forwarded-For` is handled safely.
+- `__tests__/unit/config.test.js` — verifies trusted-proxy CIDR parsing and rejection of unsafe proxy settings.
+**Next Steps:**
+- Configure `TRUSTED_PROXY_CIDRS` only if deployment traffic reaches the bridge through a reverse proxy, then rebuild and redeploy.
+**Context for Next Session:**
+- Focused proxy/config tests pass. The full suite has one unrelated empty, untracked `__tests__/init.test.js` suite that Jest reports as a failure.
 
 ### Session 3 — 2026-04-14
 

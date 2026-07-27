@@ -15,6 +15,22 @@
 
 'use strict';
 
+const crypto = require('crypto');
+
+/**
+ * Compares two bearer-token values without leaking matching-prefix timing.
+ *
+ * @param {string} provided
+ * @param {string} expected
+ * @returns {boolean}
+ */
+function secureTokenEquals(provided, expected) {
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
 /**
  * Creates gateway auth middleware.
  *
@@ -47,8 +63,12 @@ function createGatewayAuth({ sharedSecret = '', logger }) {
 
     // Secret configured — enforce Bearer token match (fail-closed).
     const authHeader = req.headers.authorization;
-    if (!authHeader || authHeader !== `Bearer ${sharedSecret}`) {
-      (req.log || log).warn({ path: req.path }, 'Gateway auth: missing or invalid Authorization header.');
+    const bearerPrefix = 'Bearer ';
+    const providedToken = typeof authHeader === 'string' && authHeader.startsWith(bearerPrefix)
+      ? authHeader.slice(bearerPrefix.length)
+      : '';
+    if (!secureTokenEquals(providedToken, sharedSecret)) {
+      (req.log || log).warn('Gateway auth: missing or invalid Authorization header.');
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -57,4 +77,4 @@ function createGatewayAuth({ sharedSecret = '', logger }) {
   };
 }
 
-module.exports = { createGatewayAuth };
+module.exports = { createGatewayAuth, secureTokenEquals };

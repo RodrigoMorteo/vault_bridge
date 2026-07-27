@@ -61,6 +61,19 @@ describe('circuitBreaker module', () => {
     expect(cb.stats().consecutiveFailures).toBe(0);
   });
 
+  test('allows only one probe while half-open', () => {
+    const cb = createCircuitBreaker({
+      failureThreshold: 1,
+      cooldownMs: 0,
+      logger: silentLogger,
+    });
+    cb.recordFailure();
+
+    expect(cb.allowRequest()).toBe(true);
+    expect(cb.allowRequest()).toBe(false);
+    expect(cb.stats().probeInFlight).toBe(true);
+  });
+
   test('re-opens after failed probe in half-open state', () => {
     const cb = createCircuitBreaker({
       failureThreshold: 1,

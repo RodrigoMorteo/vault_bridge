@@ -16,6 +16,7 @@ const {
   getClient,
   getIsClientReady,
   attemptReauth,
+  stopReauthRetries,
 } = require('./services/bitwardenClient');
 
 /** @type {import('http').Server|null} */
@@ -23,6 +24,8 @@ let server = null;
 
 /** @type {Object|null} */
 let cache = null;
+
+let isShuttingDown = false;
 
 /**
  * Initializes all services and starts the HTTP server.
@@ -41,7 +44,10 @@ async function startServer() {
   cleanStaleStateFile(config.bwsStateFile, { logger });
 
   // Create cache instance (PBI-05)
-  cache = createCache({ defaultTtlSeconds: config.cacheTtl });
+  cache = createCache({
+    defaultTtlSeconds: config.cacheTtl,
+    maxEntries: config.cacheMaxEntries,
+  });
 
   // Create circuit breaker (PBI-09)
   const circuitBreaker = createCircuitBreaker({
@@ -55,6 +61,8 @@ async function startServer() {
     accessToken: config.bwsAccessToken,
     stateFile: config.bwsStateFile,
     logger,
+    reauthRetryMaxAttempts: config.reauthRetryMaxAttempts,
+    reauthRetryBaseMs: config.reauthRetryBaseMs,
   });
 
   // Build Express app with all integrations
@@ -68,6 +76,7 @@ async function startServer() {
     bulkMaxIds: config.bulkMaxIds,
     rateLimitWindowMs: config.rateLimitWindowMs,
     rateLimitMaxRequests: config.rateLimitMaxRequests,
+    trustedProxyCidrs: config.trustedProxyCidrs,
     logger,
   });
 
@@ -75,27 +84,60 @@ async function startServer() {
     logger.info({
       port: config.port,
       cacheTtl: config.cacheTtl,
+      cacheMaxEntries: config.cacheMaxEntries,
       circuitBreakerThreshold: config.circuitBreakerThreshold,
       circuitBreakerCooldown: config.circuitBreakerCooldown,
       gatewayAuthEnforced: !!config.gatewayAuthSecret,
+      trustedProxyCidrs: config.trustedProxyCidrs,
+      requestTimeoutMs: config.requestTimeoutMs,
+      headersTimeoutMs: config.headersTimeoutMs,
+      keepAliveTimeoutMs: config.keepAliveTimeoutMs,
     }, 'Vault Bridge listening internally.');
   });
 
-  const shutdown = (signal) => {
+  // Bound slow clients and hung downstream responses. The upstream SDK may
+  // still need its own transport timeout, but these limits prevent sockets
+  // from consuming this server indefinitely.
+  server.requestTimeout = config.requestTimeoutMs;
+  server.headersTimeout = config.headersTimeoutMs;
+  server.keepAliveTimeout = config.keepAliveTimeoutMs;
+
+  const shutdown = (signal, exitCode = 0) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
     logger.info({ signal }, 'Shutdown signal received.');
     if (cache) {
-      cache.clear();
+      if (typeof cache.stop === 'function') {
+        cache.stop();
+      } else {
+        cache.clear();
+      }
       logger.info('Cache cleared.');
     }
+    stopReauthRetries();
     // Securely delete state file on shutdown (PBI-11)
     secureDelete(config.bwsStateFile, { logger });
-    server.close(() => {
-      process.exit(0);
+    const forceExit = setTimeout(() => {
+      logger.error('Graceful shutdown timed out. Forcing process exit.');
+      process.exit(exitCode || 1);
+    }, config.requestTimeoutMs);
+    forceExit.unref();
+    server.close((err) => {
+      clearTimeout(forceExit);
+      if (err) {
+        logger.error({ err }, 'Error while closing HTTP server.');
+        process.exit(1);
+      }
+      process.exit(exitCode);
     });
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+  server.on('error', (err) => {
+    logger.fatal({ err }, 'HTTP server error.');
+    shutdown('SERVER_ERROR', 1);
+  });
 
   return server;
 }

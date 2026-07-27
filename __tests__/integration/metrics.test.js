@@ -43,4 +43,20 @@ describe('metrics endpoint (PBI-10)', () => {
       .get('/metrics')
       .expect(200);
   });
+
+  test('uses a route template rather than a secret UUID in metric labels', async () => {
+    const secretId = '550e8400-e29b-41d4-a716-446655440000';
+    const client = createMockClient(() => Promise.resolve({
+      id: secretId,
+      key: 'key',
+      value: 'value',
+    }));
+    const app = buildApp({ client, isReady: () => true, logger: silentLogger });
+
+    await request(app).get(`/vault/secret/${secretId}`).expect(200);
+    const metrics = await request(app).get('/metrics').expect(200);
+
+    expect(metrics.text).toContain('route="/vault/secret/:id"');
+    expect(metrics.text).not.toContain(secretId);
+  });
 });
